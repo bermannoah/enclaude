@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 

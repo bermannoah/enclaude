@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	keychainService = "claude-seal"
+	keychainService = "enclaude"
 	keychainAccount = "age-private-key"
-	envKeyVar       = "CLAUDE_VAULT_KEY"
+	envKeyVar       = "ENCLAUDE_KEY"
 )
 
 // StoreKey saves the age private key to the OS keychain.
@@ -20,7 +20,7 @@ func StoreKey(identity *age.X25519Identity) error {
 }
 
 // LoadKey retrieves the age private key, trying (in order):
-// 1. CLAUDE_VAULT_KEY environment variable
+// 1. ENCLAUDE_KEY environment variable
 // 2. OS keychain
 // Returns the identity and the source it was loaded from.
 func LoadKey() (*age.X25519Identity, string, error) {

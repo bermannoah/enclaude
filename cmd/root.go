@@ -17,9 +17,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "claude-seal",
+	Use:   "enclaude",
 	Short: "Encrypted git-like sync for ~/.claude/",
-	Long: `claude-seal provides age-encrypted, git-backed, JSONL-aware sync
+	Long: `enclaude provides age-encrypted, git-backed, JSONL-aware sync
 for your Claude Code session data. It encrypts your conversation history,
 settings, and memory at rest and syncs them across devices with version history.`,
 	Version: Version,
@@ -36,7 +36,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without doing it")
 	rootCmd.PersistentFlags().StringVar(&flagClaudeDir, "claude-dir", "", "override ~/.claude/ location")
-	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.claude-seal/ location")
+	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.enclaude/ location")
 }
 
 func getClaudeDir() string {
@@ -60,5 +60,5 @@ func getSealDir() string {
 		fmt.Fprintln(os.Stderr, "error: cannot determine home directory:", err)
 		os.Exit(1)
 	}
-	return home + "/.claude-seal"
+	return home + "/.enclaude"
 }

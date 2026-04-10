@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/ui"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/ui"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +67,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		ui.Green(fmt.Sprintf("%d", len(diff.Added))),
 		ui.Yellow(fmt.Sprintf("%d", len(diff.Modified))),
 		ui.Red(fmt.Sprintf("%d", len(diff.Deleted))))
-	fmt.Println("Run 'claude-seal seal' to encrypt and commit these changes.")
+	fmt.Println("Run 'enclaude seal' to encrypt and commit these changes.")
 
 	return nil
 }

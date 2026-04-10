@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/ui"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/ui"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +42,7 @@ var keyExportCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("loading key: %w", err)
 		}
-		fmt.Printf("# claude-seal private key (loaded from %s)\n", source)
+		fmt.Printf("# enclaude private key (loaded from %s)\n", source)
 		fmt.Printf("# public key: %s\n", identity.Recipient().String())
 		fmt.Println(identity.String())
 		return nil
@@ -56,9 +56,9 @@ var keyImportCmd = &cobra.Command{
 	Short: "Import a private key from file, stdin, or backup",
 	Long: `Import an age private key into the OS keychain.
 
-  claude-seal key import keyfile.txt    # from file
-  echo "AGE-SECRET-KEY-..." | claude-seal key import -  # from stdin
-  claude-seal key import --from-backup  # decrypt key.age.backup`,
+  enclaude key import keyfile.txt    # from file
+  echo "AGE-SECRET-KEY-..." | enclaude key import -  # from stdin
+  enclaude key import --from-backup  # decrypt key.age.backup`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var keyData string

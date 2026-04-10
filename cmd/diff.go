@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/ui"
-	sealstore "github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/ui"
+	sealstore "github.com/coredipper/enclaude/internal/store"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 )

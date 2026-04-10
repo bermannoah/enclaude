@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-const sealHookCommand = "claude-seal hook-handler"
-const sealHookMarker = "claude-seal hook-handler"
+const sealHookCommand = "enclaude hook-handler"
+const sealHookMarker = "enclaude hook-handler"
 
 // hookEntry matches Claude Code's hook config structure.
 type hookEntry struct {
@@ -23,7 +23,7 @@ type hookDef struct {
 	Async   bool   `json:"async,omitempty"`
 }
 
-// InstallHooks adds claude-seal hooks to settings.json without
+// InstallHooks adds enclaude hooks to settings.json without
 // disturbing existing hooks.
 func InstallHooks(claudeDir string) error {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
@@ -89,7 +89,7 @@ func InstallHooks(claudeDir string) error {
 	return os.WriteFile(settingsPath, out, 0600)
 }
 
-// RemoveHooks removes claude-seal hooks from settings.json.
+// RemoveHooks removes enclaude hooks from settings.json.
 func RemoveHooks(claudeDir string) error {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 
@@ -128,7 +128,7 @@ func RemoveHooks(claudeDir string) error {
 	return os.WriteFile(settingsPath, out, 0600)
 }
 
-// HooksInstalled checks if claude-seal hooks are present in settings.json.
+// HooksInstalled checks if enclaude hooks are present in settings.json.
 func HooksInstalled(claudeDir string) bool {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 	data, err := os.ReadFile(settingsPath)

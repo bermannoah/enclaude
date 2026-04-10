@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/ui"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 

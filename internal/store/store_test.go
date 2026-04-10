@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
 )
 
 func TestSealUnsealRoundTrip(t *testing.T) {

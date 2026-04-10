@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("seal store already initialized at %s", sealDir)
 	}
 
-	fmt.Println("Initializing claude-seal...")
+	fmt.Println("Initializing enclaude...")
 	fmt.Printf("  Claude dir: %s\n", claudeDir)
 	fmt.Printf("  Seal dir:  %s\n", sealDir)
 
@@ -100,7 +100,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write .gitattributes for future merge driver
-	gitattributes := "manifest.json merge=claude-seal-manifest\n"
+	gitattributes := "manifest.json merge=enclaude-manifest\n"
 	if err := os.WriteFile(filepath.Join(sealDir, ".gitattributes"), []byte(gitattributes), 0644); err != nil {
 		return fmt.Errorf("writing .gitattributes: %w", err)
 	}
@@ -135,7 +135,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\nSeal initialized successfully!")
 	fmt.Println("\nNext steps:")
-	fmt.Println("  1. claude-seal remote add origin <url>   # set up sync remote")
-	fmt.Println("  2. claude-seal hooks install              # enable auto-sync")
+	fmt.Println("  1. enclaude remote add origin <url>   # set up sync remote")
+	fmt.Println("  2. enclaude hooks install              # enable auto-sync")
 	return nil
 }

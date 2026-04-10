@@ -80,10 +80,10 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	}
 
 	// Verify seal hooks added
-	if !strings.Contains(resultStr, "claude-seal hook-handler session-start") {
+	if !strings.Contains(resultStr, "enclaude hook-handler session-start") {
 		t.Error("session-start hook not added")
 	}
-	if !strings.Contains(resultStr, "claude-seal hook-handler session-end") {
+	if !strings.Contains(resultStr, "enclaude hook-handler session-end") {
 		t.Error("session-end hook not added")
 	}
 
@@ -113,7 +113,7 @@ func TestInstallHooksIdempotent(t *testing.T) {
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	// Count occurrences — should only appear once
-	count := strings.Count(string(result), "claude-seal hook-handler session-start")
+	count := strings.Count(string(result), "enclaude hook-handler session-start")
 	if count != 1 {
 		t.Errorf("hook-handler session-start appears %d times, expected 1", count)
 	}

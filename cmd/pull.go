@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -72,7 +72,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		if strings.Contains(out, "CONFLICT") {
 			fmt.Println("  Merge conflicts detected. The merge driver should have resolved manifest conflicts.")
-			fmt.Println("  If issues remain, run 'claude-seal repair'.")
+			fmt.Println("  If issues remain, run 'enclaude repair'.")
 		} else {
 			return fmt.Errorf("pull failed: %w\n%s", err, out)
 		}

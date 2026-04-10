@@ -1,4 +1,4 @@
-# claude-seal
+# enclaude
 
 Encrypted, git-backed, cross-device sync for `~/.claude/`.
 
@@ -19,18 +19,18 @@ This isn't a bug — it's how every AI coding assistant works today (Cursor, Cop
 2. **There's no way to sync sessions across devices.** Your history on your work laptop and your personal machine are completely separate.
 3. **There's no version history.** If a session file is corrupted or a memory file is overwritten, there's no way to recover a previous state.
 
-`claude-seal` addresses all three.
+`enclaude` addresses all three.
 
 ## What It Does
 
-`claude-seal` sits between Claude Code and your filesystem. It doesn't modify Claude Code — it works alongside it using a two-directory architecture:
+`enclaude` sits between Claude Code and your filesystem. It doesn't modify Claude Code — it works alongside it using a two-directory architecture:
 
 ```
 ~/.claude/              plaintext (what Claude Code reads/writes)
      |
      |  seal (encrypt)
      v
-~/.claude-seal/         encrypted git repo
+~/.enclaude/         encrypted git repo
   manifest.json         file index: path -> SHA-256 hash, merge strategy
   seal.toml             config: include/exclude patterns, device ID
   key.age.backup        passphrase-encrypted key backup
@@ -61,20 +61,20 @@ The only files that need real merge logic are `settings.json` (last-write-wins) 
 
 ```bash
 # Install
-go install github.com/coredipper/claude-seal@latest
+go install github.com/coredipper/enclaude@latest
 
 # Initialize — generates an age key, stores it in your OS keychain,
-# encrypts all ~/.claude/ data into ~/.claude-seal/
-claude-seal init
+# encrypts all ~/.claude/ data into ~/.enclaude/
+enclaude init
 
 # See what's changed since last seal
-claude-seal status
+enclaude status
 
 # Encrypt changes
-claude-seal seal
+enclaude seal
 
 # Decrypt back to ~/.claude/
-claude-seal unseal
+enclaude unseal
 ```
 
 ### Set Up Cross-Device Sync
@@ -82,23 +82,23 @@ claude-seal unseal
 ```bash
 # Create a private repo for your encrypted data
 # (only encrypted blobs are pushed — your plaintext never leaves your machine)
-claude-seal remote add origin git@github.com:you/claude-seal-data.git
-claude-seal push
+enclaude remote add origin git@github.com:you/enclaude-data.git
+enclaude push
 
 # On another device
-claude-seal init --import-key     # import your key from file or backup passphrase
-claude-seal remote add origin git@github.com:you/claude-seal-data.git
-claude-seal pull
-claude-seal hooks install         # auto-sync on session start/end
+enclaude init --import-key     # import your key from file or backup passphrase
+enclaude remote add origin git@github.com:you/enclaude-data.git
+enclaude pull
+enclaude hooks install         # auto-sync on session start/end
 ```
 
 ### Auto-Sync with Hooks
 
 ```bash
-claude-seal hooks install
+enclaude hooks install
 ```
 
-This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a Claude Code session starts, `claude-seal` pulls and unseals the latest data. When it ends, it seals and pushes. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
+This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a Claude Code session starts, `enclaude` pulls and unseals the latest data. When it ends, it seals and pushes. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
 
 ## Commands
 
@@ -140,7 +140,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 
 ## Merge Strategies
 
-When pulling from a remote, two devices may have diverged. `claude-seal` uses a custom git merge driver that applies different strategies depending on the file type:
+When pulling from a remote, two devices may have diverged. `enclaude` uses a custom git merge driver that applies different strategies depending on the file type:
 
 | Strategy | Used for | How it works |
 |----------|----------|-------------|
@@ -153,12 +153,12 @@ These strategies are configurable per path pattern in `seal.toml`.
 
 ## Configuration
 
-`~/.claude-seal/seal.toml` controls what gets synced and how:
+`~/.enclaude/seal.toml` controls what gets synced and how:
 
 ```toml
 [seal]
 claude_dir = "~/.claude"
-seal_dir = "~/.claude-seal"
+seal_dir = "~/.enclaude"
 device_id = "macbook-ab12cd34"
 
 [sync]
@@ -214,7 +214,7 @@ patterns = [
 
 ### Content-Addressed Storage
 
-Like git itself, `claude-seal` stores objects by their content hash. When you seal a file:
+Like git itself, `enclaude` stores objects by their content hash. When you seal a file:
 
 1. Read the plaintext from `~/.claude/`
 2. Compute SHA-256 of the plaintext → this becomes the content address
@@ -236,12 +236,12 @@ Claude Code runs (reads/writes ~/.claude/ as normal)
 Session ends → hook fires → seal changes + push
 ```
 
-The hook handler acquires a file lock (`~/.claude-seal/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code.
 
 ### New Device Onboarding
 
 ```
-1. Install claude-seal
+1. Install enclaude
 2. Clone your encrypted data repo
 3. Import your key (from password manager, file, or backup passphrase)
 4. Pull + unseal

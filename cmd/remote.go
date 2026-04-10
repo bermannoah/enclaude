@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -26,13 +26,13 @@ var remoteAddCmd = &cobra.Command{
 		}
 
 		// Register merge driver
-		driverCmd := "claude-seal merge-driver manifest %O %A %B"
-		if err := git.ConfigMergeDriver("claude-seal-manifest", driverCmd); err != nil {
+		driverCmd := "enclaude merge-driver manifest %O %A %B"
+		if err := git.ConfigMergeDriver("enclaude-manifest", driverCmd); err != nil {
 			fmt.Printf("Warning: could not register merge driver: %v\n", err)
 		}
 
 		fmt.Printf("Remote '%s' added: %s\n", name, url)
-		fmt.Println("Run 'claude-seal push' to sync.")
+		fmt.Println("Run 'enclaude push' to sync.")
 		return nil
 	},
 }
@@ -48,7 +48,7 @@ var remoteListCmd = &cobra.Command{
 		}
 		if out == "" {
 			fmt.Println("No remotes configured.")
-			fmt.Println("Run 'claude-seal remote add origin <url>' to set up sync.")
+			fmt.Println("Run 'enclaude remote add origin <url>' to set up sync.")
 		} else {
 			fmt.Println(out)
 		}

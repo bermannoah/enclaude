@@ -5,11 +5,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/session"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/session"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -155,5 +155,5 @@ func handleSessionEnd() error {
 
 // logHook writes to stderr — Claude Code captures hook stderr for verbose mode.
 func logHook(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[claude-seal] "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "[enclaude] "+format+"\n", args...)
 }

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-seal/internal/config"
-	"github.com/coredipper/claude-seal/internal/crypto"
-	"github.com/coredipper/claude-seal/internal/gitops"
-	"github.com/coredipper/claude-seal/internal/store"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +41,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	git := gitops.New(sealDir)
 
 	if !git.HasRemote(remote) {
-		return fmt.Errorf("remote '%s' not configured. Run: claude-seal remote add %s <url>", remote, remote)
+		return fmt.Errorf("remote '%s' not configured. Run: enclaude remote add %s <url>", remote, remote)
 	}
 
 	// 1. Seal
@@ -71,7 +71,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	out, err := git.Pull(remote, branch)
 	if err != nil {
 		if strings.Contains(out, "CONFLICT") {
-			fmt.Println("    Merge conflicts detected — resolve manually or run 'claude-seal repair'.")
+			fmt.Println("    Merge conflicts detected — resolve manually or run 'enclaude repair'.")
 		} else {
 			return fmt.Errorf("pull failed: %w\n%s", err, out)
 		}

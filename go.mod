@@ -1,4 +1,4 @@
-module github.com/coredipper/claude-seal
+module github.com/coredipper/enclaude
 
 go 1.26.1
 

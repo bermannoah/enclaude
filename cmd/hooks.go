@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +67,7 @@ var hooksStatusCmd = &cobra.Command{
 			fmt.Println("Seal hooks: installed")
 		} else {
 			fmt.Println("Seal hooks: not installed")
-			fmt.Println("Run 'claude-seal hooks install' to enable auto-sync.")
+			fmt.Println("Run 'enclaude hooks install' to enable auto-sync.")
 		}
 		return nil
 	},
