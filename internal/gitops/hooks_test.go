@@ -88,10 +88,10 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	}
 
 	// Verify seal hooks added
-	if !strings.Contains(resultStr, "/usr/local/bin/enclaude hook-handler session-start") {
+	if !strings.Contains(resultStr, "'/usr/local/bin/enclaude' hook-handler session-start") {
 		t.Error("session-start hook not added")
 	}
-	if !strings.Contains(resultStr, "/usr/local/bin/enclaude hook-handler session-end") {
+	if !strings.Contains(resultStr, "'/usr/local/bin/enclaude' hook-handler session-end") {
 		t.Error("session-end hook not added")
 	}
 
@@ -121,7 +121,7 @@ func TestInstallHooksIdempotent(t *testing.T) {
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	// Count occurrences — should only appear once
-	count := strings.Count(string(result), "/usr/local/bin/enclaude hook-handler session-start")
+	count := strings.Count(string(result), "'/usr/local/bin/enclaude' hook-handler session-start")
 	if count != 1 {
 		t.Errorf("hook-handler session-start appears %d times, expected 1", count)
 	}
@@ -146,6 +146,49 @@ func TestRemoveHooksPreservesOthers(t *testing.T) {
 
 	if HooksInstalled(dir) {
 		t.Error("hooks should be removed")
+	}
+}
+
+func TestShellQuoteHandlesSpaces(t *testing.T) {
+	old := resolveExecutable
+	resolveExecutable = func() (string, error) {
+		return "/path with spaces/enclaude", nil
+	}
+	defer func() { resolveExecutable = old }()
+
+	cmd := sealHookCommand()
+	if cmd != "'/path with spaces/enclaude' hook-handler" {
+		t.Errorf("unexpected command: %s", cmd)
+	}
+}
+
+func TestShellQuoteHandlesSingleQuotes(t *testing.T) {
+	old := resolveExecutable
+	resolveExecutable = func() (string, error) {
+		return "/it's/enclaude", nil
+	}
+	defer func() { resolveExecutable = old }()
+
+	cmd := sealHookCommand()
+	expected := `'/it'\''s/enclaude' hook-handler`
+	if cmd != expected {
+		t.Errorf("unexpected command: got %s, want %s", cmd, expected)
+	}
+}
+
+func TestSymlinkNotResolved(t *testing.T) {
+	// sealHookCommand should use the path as-is from os.Executable,
+	// not chase symlinks. We verify by checking the output matches
+	// the value returned by resolveExecutable directly.
+	old := resolveExecutable
+	resolveExecutable = func() (string, error) {
+		return "/opt/homebrew/bin/enclaude", nil
+	}
+	defer func() { resolveExecutable = old }()
+
+	cmd := sealHookCommand()
+	if cmd != "'/opt/homebrew/bin/enclaude' hook-handler" {
+		t.Errorf("unexpected command (symlink may have been resolved): %s", cmd)
 	}
 }
 

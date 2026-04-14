@@ -8,25 +8,29 @@ import (
 	"strings"
 )
 
-const sealHookMarker = "enclaude hook-handler"
-
 // resolveExecutable returns the absolute path to the currently running binary.
 // Package-level var so tests can override it.
 var resolveExecutable = os.Executable
 
-// sealHookCommand returns the absolute path to the enclaude binary
+// sealHookCommand returns the shell-safe absolute path to the enclaude binary
 // for use in hook commands. Hooks run via /bin/sh which may not have
 // ~/go/bin or other user-specific paths in PATH.
+// We intentionally do NOT resolve symlinks: symlinks (e.g. from Homebrew)
+// are stable across upgrades, while their targets are versioned and ephemeral.
 func sealHookCommand() string {
 	exe, err := resolveExecutable()
 	if err != nil {
 		return "enclaude hook-handler"
 	}
-	resolved, err := filepath.EvalSymlinks(exe)
-	if err != nil {
-		return exe + " hook-handler"
-	}
-	return resolved + " hook-handler"
+	return shellQuote(exe) + " hook-handler"
+}
+
+// shellQuote wraps a string in single quotes for safe use in /bin/sh commands.
+// Single quotes prevent all shell expansion. Any literal single quotes in the
+// input are handled by ending the quoted segment, inserting an escaped quote,
+// and reopening.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // hookEntry matches Claude Code's hook config structure.
@@ -257,5 +261,7 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 }
 
 func containsMarker(cmd string) bool {
-	return strings.Contains(cmd, sealHookMarker)
+	// Match both bare ("enclaude hook-handler ...") and shell-quoted
+	// ("'/path/to/enclaude' hook-handler ...") forms.
+	return strings.Contains(cmd, "enclaude") && strings.Contains(cmd, "hook-handler")
 }
