@@ -300,7 +300,11 @@ func extractAction(cmd string) string {
 // marker format. Returns the number of hooks migrated.
 func migrateLegacyHooks(hooks map[string]json.RawMessage) int {
 	migrated := 0
-	for event, raw := range hooks {
+	for _, event := range []string{"SessionStart", "SessionEnd"} {
+		raw, ok := hooks[event]
+		if !ok {
+			continue
+		}
 		var entries []hookEntry
 		if err := json.Unmarshal(raw, &entries); err != nil {
 			continue
