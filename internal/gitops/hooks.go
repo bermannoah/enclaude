@@ -271,18 +271,25 @@ func hasMarker(cmd string) bool {
 	return strings.Contains(cmd, hookMarker)
 }
 
-// isLegacyHook detects pre-marker enclaude hooks. Requires "enclaude"
-// followed by "hook-handler" in the command, matching all legacy forms:
+// isLegacyHook detects pre-marker enclaude hooks. Requires the exact
+// binary name "enclaude" (not "enclaude-wrapper" etc.) followed by
+// "hook-handler" in the command. Matches all legacy forms:
 // bare ("enclaude hook-handler ..."), absolute path
 // ("/path/to/enclaude hook-handler ..."), and quoted
 // ("'/path/to/enclaude' hook-handler ...").
 // Used only by migration and removal, never for idempotency checks.
 func isLegacyHook(cmd string) bool {
-	i := strings.Index(cmd, "enclaude")
+	const name = "enclaude"
+	i := strings.Index(cmd, name)
 	if i < 0 {
 		return false
 	}
-	return strings.Contains(cmd[i:], "hook-handler")
+	// Verify "enclaude" is the full binary name, not a prefix like "enclaude-wrapper"
+	end := i + len(name)
+	if end < len(cmd) && cmd[end] != ' ' && cmd[end] != '\'' && cmd[end] != '"' {
+		return false
+	}
+	return strings.Contains(cmd[end:], "hook-handler")
 }
 
 // extractAction extracts the hook action (e.g. "session-start") from a
