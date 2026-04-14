@@ -20,16 +20,16 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	dir := t.TempDir()
 
 	// Write a settings.json with existing hooks (simulating peon-ping, notchi)
-	existing := map[string]interface{}{
-		"env": map[string]interface{}{
+	existing := map[string]any{
+		"env": map[string]any{
 			"ENABLE_LSP_TOOL": "1",
 		},
-		"hooks": map[string]interface{}{
-			"SessionStart": []interface{}{
-				map[string]interface{}{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
 					"matcher": "",
-					"hooks": []interface{}{
-						map[string]interface{}{
+					"hooks": []any{
+						map[string]any{
 							"type":    "command",
 							"command": "/path/to/peon-ping/peon.sh",
 							"timeout": 10,
@@ -37,11 +37,11 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 					},
 				},
 			},
-			"SessionEnd": []interface{}{
-				map[string]interface{}{
+			"SessionEnd": []any{
+				map[string]any{
 					"matcher": "",
-					"hooks": []interface{}{
-						map[string]interface{}{
+					"hooks": []any{
+						map[string]any{
 							"type":    "command",
 							"command": "/path/to/peon-ping/peon.sh",
 							"timeout": 10,
@@ -50,11 +50,11 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 					},
 				},
 			},
-			"PreToolUse": []interface{}{
-				map[string]interface{}{
+			"PreToolUse": []any{
+				map[string]any{
 					"matcher": "Bash",
-					"hooks": []interface{}{
-						map[string]interface{}{
+					"hooks": []any{
+						map[string]any{
 							"type":    "command",
 							"command": "/path/to/rtk-rewrite.sh",
 						},
@@ -62,7 +62,7 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 				},
 			},
 		},
-		"enabledPlugins": map[string]interface{}{
+		"enabledPlugins": map[string]any{
 			"linear@claude-plugins-official": true,
 		},
 	}
@@ -87,12 +87,15 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 		t.Error("rtk-rewrite hook was removed")
 	}
 
-	// Verify seal hooks added
-	if !strings.Contains(resultStr, "'/usr/local/bin/enclaude' hook-handler session-start") {
+	// Verify seal hooks added with marker
+	if !strings.Contains(resultStr, "hook-handler session-start") {
 		t.Error("session-start hook not added")
 	}
-	if !strings.Contains(resultStr, "'/usr/local/bin/enclaude' hook-handler session-end") {
+	if !strings.Contains(resultStr, "hook-handler session-end") {
 		t.Error("session-end hook not added")
+	}
+	if strings.Count(resultStr, hookMarker) != 2 {
+		t.Error("expected exactly 2 hook markers (SessionStart + SessionEnd)")
 	}
 
 	// Verify non-hook settings preserved
@@ -111,7 +114,7 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 
 func TestInstallHooksIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	settings := map[string]interface{}{"hooks": map[string]interface{}{}}
+	settings := map[string]any{"hooks": map[string]any{}}
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
@@ -120,16 +123,15 @@ func TestInstallHooksIdempotent(t *testing.T) {
 	InstallHooks(dir)
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
-	// Count occurrences — should only appear once
-	count := strings.Count(string(result), "'/usr/local/bin/enclaude' hook-handler session-start")
-	if count != 1 {
-		t.Errorf("hook-handler session-start appears %d times, expected 1", count)
+	count := strings.Count(string(result), hookMarker)
+	if count != 2 { // one per event (SessionStart + SessionEnd)
+		t.Errorf("hook marker appears %d times, expected 2", count)
 	}
 }
 
 func TestRemoveHooksPreservesOthers(t *testing.T) {
 	dir := t.TempDir()
-	settings := map[string]interface{}{"hooks": map[string]interface{}{}}
+	settings := map[string]any{"hooks": map[string]any{}}
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
@@ -177,9 +179,6 @@ func TestShellQuoteHandlesSingleQuotes(t *testing.T) {
 }
 
 func TestSymlinkNotResolved(t *testing.T) {
-	// sealHookCommand should use the path as-is from os.Executable,
-	// not chase symlinks. We verify by checking the output matches
-	// the value returned by resolveExecutable directly.
 	old := resolveExecutable
 	resolveExecutable = func() (string, error) {
 		return "/opt/homebrew/bin/enclaude", nil
@@ -197,31 +196,34 @@ func TestContainsMarker(t *testing.T) {
 		cmd  string
 		want bool
 	}{
-		// Should match
-		{"enclaude hook-handler session-start", true},
-		{"'/usr/local/bin/enclaude' hook-handler session-end", true},
-		{"/Users/bogdan/go/bin/enclaude hook-handler session-start", true},
-		{`"/opt/homebrew/bin/enclaude" hook-handler session-end`, true},
-		{"'/path with spaces/enclaude' hook-handler session-start", true},
-		{"'/it'\\''s here/enclaude' hook-handler session-end", true},  // escaped apostrophe via '\''
-		{"'/usr/local/bin/enclaude'\nhook-handler session-start", true}, // newline as token separator
-		// Should NOT match
+		// Should match — any command containing the marker comment
+		{"enclaude hook-handler session-start  " + hookMarker, true},
+		{"'/usr/local/bin/enclaude' hook-handler session-end  " + hookMarker, true},
+		{"'/path with spaces/enclaude' hook-handler session-start  " + hookMarker, true},
+		// Should NOT match — no marker comment
+		{"enclaude hook-handler session-start", false},
+		{"'/usr/local/bin/enclaude' hook-handler session-end", false},
 		{"some-script --enclaude --hook-handler", false},
-		{"/path/to/hook-handler enclaude", false},
-		{"enclaude-wrapper hook-handler session-start", false},
-		{"/path/to/not-enclaude hook-handler session-start", false},
-		{"enclaude hook-handler-wrapper session-start", false},
-		{"'/path/enclaude' hook-handler2", false},
-		// Quoted+unquoted concatenation (POSIX: single token)
-		{"'/path/enclaude'hook-handler session-start", false},
-		{"enclaude 'hook-handler'wrapper session-start", false},
-		{"peon.sh", false},
+		{"/path/to/peon-ping/peon.sh", false},
 		{"", false},
 	}
 	for _, tt := range tests {
 		if got := containsMarker(tt.cmd); got != tt.want {
 			t.Errorf("containsMarker(%q) = %v, want %v", tt.cmd, got, tt.want)
 		}
+	}
+}
+
+func TestSealHookFullIncludesMarker(t *testing.T) {
+	cmd := sealHookFull("session-start")
+	if !strings.Contains(cmd, hookMarker) {
+		t.Errorf("sealHookFull missing marker: %s", cmd)
+	}
+	if !strings.Contains(cmd, "session-start") {
+		t.Errorf("sealHookFull missing action: %s", cmd)
+	}
+	if !strings.Contains(cmd, "/usr/local/bin/enclaude") {
+		t.Errorf("sealHookFull missing executable path: %s", cmd)
 	}
 }
 

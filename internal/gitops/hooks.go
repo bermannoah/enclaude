@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// hookMarker is a shell comment appended to every enclaude hook command.
+// Detection uses a simple strings.Contains on this marker, avoiding
+// any need to parse shell quoting or tokenization.
+const hookMarker = "# enclaude-managed"
+
 // resolveExecutable returns the absolute path to the currently running binary.
 // Package-level var so tests can override it.
 var resolveExecutable = os.Executable
@@ -23,6 +28,11 @@ func sealHookCommand() string {
 		return "enclaude hook-handler"
 	}
 	return shellQuote(exe) + " hook-handler"
+}
+
+// sealHookFull builds a complete hook command with the marker comment.
+func sealHookFull(action string) string {
+	return sealHookCommand() + " " + action + "  " + hookMarker
 }
 
 // shellQuote wraps a string in single quotes for safe use in /bin/sh commands.
@@ -71,13 +81,11 @@ func InstallHooks(claudeDir string) error {
 		hooks = make(map[string]json.RawMessage)
 	}
 
-	hookCmd := sealHookCommand()
-
 	// Add SessionStart hook
 	if err := addHookEntry(hooks, "SessionStart", hookEntry{
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: hookCmd + " session-start",
+			Command: sealHookFull("session-start"),
 			Timeout: 30,
 		}},
 	}); err != nil {
@@ -88,7 +96,7 @@ func InstallHooks(claudeDir string) error {
 	if err := addHookEntry(hooks, "SessionEnd", hookEntry{
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: hookCmd + " session-end",
+			Command: sealHookFull("session-end"),
 			Timeout: 60,
 			Async:   true,
 		}},
@@ -261,61 +269,5 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 }
 
 func containsMarker(cmd string) bool {
-	// Match both bare ("enclaude hook-handler ...") and shell-quoted
-	// ("'/path with spaces/enclaude' hook-handler ...") forms.
-	// Handles the '\'' escape sequence used by shellQuote for paths
-	// containing apostrophes.
-	arg0, rest := shellSplitFirst(cmd)
-	if arg0 != "enclaude" && !strings.HasSuffix(arg0, "/enclaude") {
-		return false
-	}
-	arg1, _ := shellSplitFirst(rest)
-	return arg1 == "hook-handler"
-}
-
-// shellSplitFirst extracts the first shell token from cmd, handling
-// single-quoted strings including the '\'' escape idiom. Returns the
-// unquoted token value and the remaining string.
-func shellSplitFirst(cmd string) (token, rest string) {
-	cmd = strings.TrimSpace(cmd)
-	if len(cmd) == 0 {
-		return "", ""
-	}
-
-	// Accumulate token segments: quoted runs, '\'' escapes, and
-	// adjacent unquoted characters are all part of one POSIX token
-	// until we hit unquoted whitespace.
-	var b strings.Builder
-	i := 0
-	for i < len(cmd) {
-		switch cmd[i] {
-		case '\'':
-			end := strings.IndexByte(cmd[i+1:], '\'')
-			if end < 0 {
-				b.WriteString(cmd[i+1:])
-				return b.String(), ""
-			}
-			b.WriteString(cmd[i+1 : i+1+end])
-			i = i + 1 + end + 1
-			// Handle '\'' escape (end quote, escaped quote, reopen)
-			if strings.HasPrefix(cmd[i:], `\'`) {
-				b.WriteByte('\'')
-				i += 2
-			}
-		case '"':
-			end := strings.IndexByte(cmd[i+1:], '"')
-			if end < 0 {
-				b.WriteString(cmd[i+1:])
-				return b.String(), ""
-			}
-			b.WriteString(cmd[i+1 : i+1+end])
-			i = i + 1 + end + 1
-		case ' ', '\t', '\n':
-			return b.String(), cmd[i:]
-		default:
-			b.WriteByte(cmd[i])
-			i++
-		}
-	}
-	return b.String(), ""
+	return strings.Contains(cmd, hookMarker)
 }
