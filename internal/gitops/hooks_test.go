@@ -192,6 +192,31 @@ func TestSymlinkNotResolved(t *testing.T) {
 	}
 }
 
+func TestContainsMarker(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		// Should match
+		{"enclaude hook-handler session-start", true},
+		{"'/usr/local/bin/enclaude' hook-handler session-end", true},
+		{"/Users/bogdan/go/bin/enclaude hook-handler session-start", true},
+		{`"/opt/homebrew/bin/enclaude" hook-handler session-end`, true},
+		// Should NOT match
+		{"some-script --enclaude --hook-handler", false},
+		{"/path/to/hook-handler enclaude", false},
+		{"enclaude-wrapper hook-handler session-start", false},
+		{"/path/to/not-enclaude hook-handler session-start", false},
+		{"peon.sh", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := containsMarker(tt.cmd); got != tt.want {
+			t.Errorf("containsMarker(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
+
 func TestHooksInstalledFalseWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	if HooksInstalled(dir) {

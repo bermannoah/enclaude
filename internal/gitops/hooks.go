@@ -262,6 +262,13 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 
 func containsMarker(cmd string) bool {
 	// Match both bare ("enclaude hook-handler ...") and shell-quoted
-	// ("'/path/to/enclaude' hook-handler ...") forms.
-	return strings.Contains(cmd, "enclaude") && strings.Contains(cmd, "hook-handler")
+	// ("'/path/to/enclaude' hook-handler ...") forms by verifying
+	// argv[0] is "enclaude" or ends with "/enclaude" (possibly quoted)
+	// and argv[1] is "hook-handler".
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 || fields[1] != "hook-handler" {
+		return false
+	}
+	arg0 := strings.Trim(fields[0], "'\"")
+	return arg0 == "enclaude" || strings.HasSuffix(arg0, "/enclaude")
 }
