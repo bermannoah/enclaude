@@ -211,6 +211,9 @@ func TestContainsMarker(t *testing.T) {
 		{"/path/to/not-enclaude hook-handler session-start", false},
 		{"enclaude hook-handler-wrapper session-start", false},
 		{"'/path/enclaude' hook-handler2", false},
+		// Quoted+unquoted concatenation (POSIX: single token)
+		{"'/path/enclaude'hook-handler session-start", false},
+		{"enclaude 'hook-handler'wrapper session-start", false},
 		{"peon.sh", false},
 		{"", false},
 	}

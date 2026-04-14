@@ -282,34 +282,27 @@ func shellSplitFirst(cmd string) (token, rest string) {
 		return "", ""
 	}
 
-	// Unquoted token
-	if cmd[0] != '\'' && cmd[0] != '"' {
-		if i := strings.IndexByte(cmd, ' '); i >= 0 {
-			return cmd[:i], cmd[i:]
-		}
-		return cmd, ""
-	}
-
-	// Quoted token — accumulate segments handling '\'' escapes
+	// Accumulate token segments: quoted runs, '\'' escapes, and
+	// adjacent unquoted characters are all part of one POSIX token
+	// until we hit unquoted whitespace.
 	var b strings.Builder
 	i := 0
 	for i < len(cmd) {
-		if cmd[i] == '\'' {
-			// Find closing single quote
+		switch cmd[i] {
+		case '\'':
 			end := strings.IndexByte(cmd[i+1:], '\'')
 			if end < 0 {
-				// Unterminated quote — take the rest
 				b.WriteString(cmd[i+1:])
 				return b.String(), ""
 			}
 			b.WriteString(cmd[i+1 : i+1+end])
-			i = i + 1 + end + 1 // past closing quote
-			// Check for '\'' continuation (escaped single quote)
+			i = i + 1 + end + 1
+			// Handle '\'' escape (end quote, escaped quote, reopen)
 			if strings.HasPrefix(cmd[i:], `\'`) {
 				b.WriteByte('\'')
-				i += 2 // skip \'
+				i += 2
 			}
-		} else if cmd[i] == '"' {
+		case '"':
 			end := strings.IndexByte(cmd[i+1:], '"')
 			if end < 0 {
 				b.WriteString(cmd[i+1:])
@@ -317,9 +310,12 @@ func shellSplitFirst(cmd string) (token, rest string) {
 			}
 			b.WriteString(cmd[i+1 : i+1+end])
 			i = i + 1 + end + 1
-		} else {
-			break
+		case ' ', '\t':
+			return b.String(), cmd[i:]
+		default:
+			b.WriteByte(cmd[i])
+			i++
 		}
 	}
-	return b.String(), cmd[i:]
+	return b.String(), ""
 }
