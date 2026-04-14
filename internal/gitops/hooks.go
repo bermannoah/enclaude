@@ -263,35 +263,63 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 func containsMarker(cmd string) bool {
 	// Match both bare ("enclaude hook-handler ...") and shell-quoted
 	// ("'/path with spaces/enclaude' hook-handler ...") forms.
-	// We extract argv[0] respecting quotes, then check the remainder
-	// starts with "hook-handler".
-	arg0, rest := splitShellArg0(cmd)
-	arg0 = strings.Trim(arg0, "'\"")
+	// Handles the '\'' escape sequence used by shellQuote for paths
+	// containing apostrophes.
+	arg0, rest := shellSplitFirst(cmd)
 	if arg0 != "enclaude" && !strings.HasSuffix(arg0, "/enclaude") {
 		return false
 	}
-	rest = strings.TrimSpace(rest)
-	return strings.HasPrefix(rest, "hook-handler")
+	arg1, _ := shellSplitFirst(rest)
+	return arg1 == "hook-handler"
 }
 
-// splitShellArg0 splits a command string into its first argument and
-// the remainder, respecting single and double quotes around arg0.
-func splitShellArg0(cmd string) (arg0, rest string) {
+// shellSplitFirst extracts the first shell token from cmd, handling
+// single-quoted strings including the '\'' escape idiom. Returns the
+// unquoted token value and the remaining string.
+func shellSplitFirst(cmd string) (token, rest string) {
 	cmd = strings.TrimSpace(cmd)
 	if len(cmd) == 0 {
 		return "", ""
 	}
-	if cmd[0] == '\'' || cmd[0] == '"' {
-		quote := cmd[0]
-		end := strings.IndexByte(cmd[1:], quote)
-		if end >= 0 {
-			// include the quotes in arg0 so caller can strip them
-			return cmd[:end+2], cmd[end+2:]
+
+	// Unquoted token
+	if cmd[0] != '\'' && cmd[0] != '"' {
+		if i := strings.IndexByte(cmd, ' '); i >= 0 {
+			return cmd[:i], cmd[i:]
+		}
+		return cmd, ""
+	}
+
+	// Quoted token — accumulate segments handling '\'' escapes
+	var b strings.Builder
+	i := 0
+	for i < len(cmd) {
+		if cmd[i] == '\'' {
+			// Find closing single quote
+			end := strings.IndexByte(cmd[i+1:], '\'')
+			if end < 0 {
+				// Unterminated quote — take the rest
+				b.WriteString(cmd[i+1:])
+				return b.String(), ""
+			}
+			b.WriteString(cmd[i+1 : i+1+end])
+			i = i + 1 + end + 1 // past closing quote
+			// Check for '\'' continuation (escaped single quote)
+			if strings.HasPrefix(cmd[i:], `\'`) {
+				b.WriteByte('\'')
+				i += 2 // skip \'
+			}
+		} else if cmd[i] == '"' {
+			end := strings.IndexByte(cmd[i+1:], '"')
+			if end < 0 {
+				b.WriteString(cmd[i+1:])
+				return b.String(), ""
+			}
+			b.WriteString(cmd[i+1 : i+1+end])
+			i = i + 1 + end + 1
+		} else {
+			break
 		}
 	}
-	// unquoted: split on first space
-	if i := strings.IndexByte(cmd, ' '); i >= 0 {
-		return cmd[:i], cmd[i:]
-	}
-	return cmd, ""
+	return b.String(), cmd[i:]
 }
