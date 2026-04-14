@@ -284,7 +284,11 @@ func isLegacyHook(cmd string) bool {
 	if i < 0 {
 		return false
 	}
-	// Verify "enclaude" is the full binary name, not a prefix like "enclaude-wrapper"
+	// Boundary before: must be start of string, path separator, or quote
+	if i > 0 && cmd[i-1] != '/' && cmd[i-1] != '\'' && cmd[i-1] != '"' {
+		return false
+	}
+	// Boundary after: must be end of string, space, or quote
 	end := i + len(name)
 	if end < len(cmd) && cmd[end] != ' ' && cmd[end] != '\'' && cmd[end] != '"' {
 		return false

@@ -279,9 +279,12 @@ func TestIsLegacyHook(t *testing.T) {
 		{"enclaude hook-handler session-start", true},
 		{"/usr/local/bin/enclaude hook-handler session-end", true},
 		{"'/path/to/enclaude' hook-handler session-start", true},
-		// Not legacy
+		// Not legacy — prefix/suffix mismatch
 		{"enclaude-wrapper hook-handler session-start", false},
 		{"/usr/local/bin/enclaude-proxy hook-handler session-end", false},
+		{"myenclaude hook-handler session-start", false},
+		{"/opt/bin/notenclaude hook-handler session-end", false},
+		// Not legacy — unrelated
 		{"/path/to/peon-ping/peon.sh", false},
 		{"some-random-script --foo", false},
 		{"", false},
