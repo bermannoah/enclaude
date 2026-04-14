@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	// Override executable resolver so tests get a predictable command path
+	resolveExecutable = func() (string, error) {
+		return "/usr/local/bin/enclaude", nil
+	}
+	os.Exit(m.Run())
+}
+
 func TestInstallHooksPreservesExisting(t *testing.T) {
 	dir := t.TempDir()
 
@@ -80,10 +88,10 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	}
 
 	// Verify seal hooks added
-	if !strings.Contains(resultStr, "enclaude hook-handler session-start") {
+	if !strings.Contains(resultStr, "/usr/local/bin/enclaude hook-handler session-start") {
 		t.Error("session-start hook not added")
 	}
-	if !strings.Contains(resultStr, "enclaude hook-handler session-end") {
+	if !strings.Contains(resultStr, "/usr/local/bin/enclaude hook-handler session-end") {
 		t.Error("session-end hook not added")
 	}
 
@@ -113,7 +121,7 @@ func TestInstallHooksIdempotent(t *testing.T) {
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	// Count occurrences — should only appear once
-	count := strings.Count(string(result), "enclaude hook-handler session-start")
+	count := strings.Count(string(result), "/usr/local/bin/enclaude hook-handler session-start")
 	if count != 1 {
 		t.Errorf("hook-handler session-start appears %d times, expected 1", count)
 	}

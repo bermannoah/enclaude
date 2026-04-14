@@ -5,10 +5,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const sealHookCommand = "enclaude hook-handler"
 const sealHookMarker = "enclaude hook-handler"
+
+// resolveExecutable returns the absolute path to the currently running binary.
+// Package-level var so tests can override it.
+var resolveExecutable = os.Executable
+
+// sealHookCommand returns the absolute path to the enclaude binary
+// for use in hook commands. Hooks run via /bin/sh which may not have
+// ~/go/bin or other user-specific paths in PATH.
+func sealHookCommand() string {
+	exe, err := resolveExecutable()
+	if err != nil {
+		return "enclaude hook-handler"
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		return exe + " hook-handler"
+	}
+	return resolved + " hook-handler"
+}
 
 // hookEntry matches Claude Code's hook config structure.
 type hookEntry struct {
@@ -48,12 +67,13 @@ func InstallHooks(claudeDir string) error {
 		hooks = make(map[string]json.RawMessage)
 	}
 
+	hookCmd := sealHookCommand()
+
 	// Add SessionStart hook
 	if err := addHookEntry(hooks, "SessionStart", hookEntry{
-		Matcher: "",
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: sealHookCommand + " session-start",
+			Command: hookCmd + " session-start",
 			Timeout: 30,
 		}},
 	}); err != nil {
@@ -62,10 +82,9 @@ func InstallHooks(claudeDir string) error {
 
 	// Add SessionEnd hook (async to avoid blocking Claude shutdown)
 	if err := addHookEntry(hooks, "SessionEnd", hookEntry{
-		Matcher: "",
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: sealHookCommand + " session-end",
+			Command: hookCmd + " session-end",
 			Timeout: 60,
 			Async:   true,
 		}},
@@ -238,5 +257,5 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 }
 
 func containsMarker(cmd string) bool {
-	return len(cmd) >= len(sealHookMarker) && cmd[:len(sealHookMarker)] == sealHookMarker
+	return strings.Contains(cmd, sealHookMarker)
 }
