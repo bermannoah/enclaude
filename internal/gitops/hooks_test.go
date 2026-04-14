@@ -196,15 +196,17 @@ func TestContainsMarker(t *testing.T) {
 		cmd  string
 		want bool
 	}{
-		// Should match — any command containing the marker comment
+		// New-style: marker comment present
 		{"enclaude hook-handler session-start  " + hookMarker, true},
 		{"'/usr/local/bin/enclaude' hook-handler session-end  " + hookMarker, true},
 		{"'/path with spaces/enclaude' hook-handler session-start  " + hookMarker, true},
-		// Should NOT match — no marker comment
-		{"enclaude hook-handler session-start", false},
-		{"'/usr/local/bin/enclaude' hook-handler session-end", false},
-		{"some-script --enclaude --hook-handler", false},
+		// Legacy: no marker but contains "enclaude hook-handler"
+		{"enclaude hook-handler session-start", true},
+		{"'/usr/local/bin/enclaude' hook-handler session-end", true},
+		{"/Users/bogdan/go/bin/enclaude hook-handler session-start", true},
+		// Should NOT match
 		{"/path/to/peon-ping/peon.sh", false},
+		{"some-random-script --foo", false},
 		{"", false},
 	}
 	for _, tt := range tests {

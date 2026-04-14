@@ -269,5 +269,12 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 }
 
 func containsMarker(cmd string) bool {
-	return strings.Contains(cmd, hookMarker)
+	// New-style: marker comment (written by current version)
+	if strings.Contains(cmd, hookMarker) {
+		return true
+	}
+	// Legacy: hooks installed before the marker was introduced.
+	// Checks for "enclaude" and "hook-handler" as separate substrings
+	// to handle both bare and shell-quoted path forms.
+	return strings.Contains(cmd, "enclaude") && strings.Contains(cmd, "hook-handler")
 }
