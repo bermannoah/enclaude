@@ -169,11 +169,11 @@ read without the private key stored in the OS keychain on the originating device
 
 1. Install enclaude.
 2. Clone this repository to {TICK}~/.enclaude/{TICK}:
-	{TICK}git clone <remote-url> ~/.enclaude{TICK}
+   {TICK}git clone <remote-url> ~/.enclaude{TICK}
 3. Import your private key into the keychain:
-	{TICK}enclaude key import{TICK}
+   {TICK}enclaude key import{TICK}
 4. Decrypt and restore your Claude files:
-	{TICK}enclaude unseal{TICK}
+   {TICK}enclaude unseal{TICK}
 
 ## Key recovery
 
