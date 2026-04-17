@@ -54,11 +54,15 @@ func runReadmeRegen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("git add: %w", err)
 	}
 
-	gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m", "seal: regenerate README.md")
-	if flagVerbose {
-		gitCommit.Stdout = cmd.OutOrStdout()
-		gitCommit.Stderr = cmd.ErrOrStderr()
+	// Skip commit if nothing changed.
+	if err := exec.Command("git", "-C", sealDir, "diff", "--quiet", "--cached", "README.md").Run(); err == nil {
+		fmt.Println("README.md unchanged, nothing to commit.")
+		return nil
 	}
+
+	gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m", "seal: regenerate README.md")
+	gitCommit.Stdout = cmd.OutOrStdout()
+	gitCommit.Stderr = cmd.ErrOrStderr()
 	if err := gitCommit.Run(); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}

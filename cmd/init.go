@@ -146,46 +146,60 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+const readmeTemplate = `# enclaude seal store
+
+This repository contains an encrypted backup of a Claude Code configuration
+directory, managed by [enclaude](https://github.com/coredipper/enclaude).
+
+All files are encrypted with [age](https://age-encryption.org/) and cannot be
+read without the private key stored in the OS keychain on the originating device.
+
+> **Private keys are never stored here.** The age private key lives exclusively
+> in the OS keychain (and optionally in an encrypted backup file). Do not commit
+> private keys or unencrypted backups to this repository.
+
+## Repository details
+
+| Field      | Value                    |
+|------------|--------------------------|
+| Public key | {PUBLIC_KEY} |
+| Device ID  | {DEVICE_ID} |
+
+## Restoring on a new machine
+
+1. Install enclaude.
+2. Clone this repository to {T}~/.enclaude/{T}:
+   {T}git clone <remote-url> ~/.enclaude{T}
+3. Import your private key into the keychain:
+   {T}enclaude key import{T}
+4. Decrypt and restore your Claude files:
+   {T}enclaude unseal{T}
+
+## Key recovery
+
+If the OS keychain entry is lost, restore from the passphrase-encrypted backup:
+
+{F}
+enclaude key recover key.age.backup
+{F}
+
+You will be prompted for the passphrase you set during {T}enclaude init{T}.
+
+## Daily use
+
+{F}
+enclaude seal          # encrypt and commit changes
+enclaude push          # push to remote
+enclaude pull          # pull and decrypt latest
+enclaude status        # show unsealed changes not yet sealed
+{F}
+`
+
 func buildReadme(publicKey, deviceID string) string {
-	tick := "`"
-	fence := "```"
-	return fmt.Sprintf(
-		"# enclaude seal store\n\n"+
-			"This repository contains an encrypted backup of a Claude Code configuration\n"+
-			"directory, managed by [enclaude](https://github.com/coredipper/enclaude).\n\n"+
-			"All files are encrypted with [age](https://age-encryption.org/) and cannot be\n"+
-			"read without the private key stored in the OS keychain on the originating device.\n\n"+
-			"> **Private keys are never stored here.** The age private key lives exclusively\n"+
-			"> in the OS keychain (and optionally in an encrypted backup file). Do not commit\n"+
-			"> private keys or unencrypted backups to this repository.\n\n"+
-			"## Repository details\n\n"+
-			"| Field      | Value                    |\n"+
-			"|------------|---------------------------|\n"+
-			"| Public key | %s |\n"+
-			"| Device ID  | %s |\n\n"+
-			"## Restoring on a new machine\n\n"+
-			"1. Install enclaude.\n"+
-			"2. Clone this repository to %s~/.enclaude/%s:\n"+
-			"   %sgit clone <remote-url> ~/.enclaude%s\n"+
-			"3. Import your private key into the keychain:\n"+
-			"   %senclaude key import%s\n"+
-			"4. Decrypt and restore your Claude files:\n"+
-			"   %senclaude unseal%s\n\n"+
-			"## Key recovery\n\n"+
-			"If the OS keychain entry is lost, restore from the passphrase-encrypted backup:\n\n"+
-			fence+"\n"+
-			"enclaude key recover key.age.backup\n"+
-			fence+"\n\n"+
-			"You will be prompted for the passphrase you set during %senclaude init%s.\n\n"+
-			"## Daily use\n\n"+
-			fence+"\n"+
-			"enclaude seal          # encrypt and commit changes\n"+
-			"enclaude push          # push to remote\n"+
-			"enclaude pull          # pull and decrypt latest\n"+
-			"enclaude status        # show unsealed changes not yet sealed\n"+
-			fence+"\n",
-		publicKey, deviceID,
-		tick, tick, tick, tick, tick, tick, tick, tick,
-		tick, tick,
-	)
+	return strings.NewReplacer(
+		"{PUBLIC_KEY}", publicKey,
+		"{DEVICE_ID}", deviceID,
+		"{T}", "`",
+		"{F}", "```",
+	).Replace(readmeTemplate)
 }
