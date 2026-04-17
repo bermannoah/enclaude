@@ -111,6 +111,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}
 
+	// Write README
+	readme := buildReadme(identity.Recipient().String(), cfg.Seal.DeviceID)
+	if err := os.WriteFile(filepath.Join(sealDir, "README.md"), []byte(readme), 0644); err != nil {
+		return fmt.Errorf("writing README: %w", err)
+	}
+
 	// 7. Initial seal
 	fmt.Println("\nPerforming initial seal...")
 	stats, err := store.Seal(cfg, identity.Recipient(), flagVerbose, nil)
@@ -138,4 +144,62 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  1. enclaude remote add origin <url>   # set up sync remote")
 	fmt.Println("  2. enclaude hooks install              # enable auto-sync")
 	return nil
+}
+
+const readmeTemplate = `# enclaude seal store
+
+This repository contains an encrypted backup of a Claude Code configuration
+directory, managed by [enclaude](https://github.com/coredipper/enclaude).
+
+All files are encrypted with [age](https://age-encryption.org/) and cannot be
+read without the private key stored in the OS keychain on the originating device.
+
+> **Private keys are never stored here.** The age private key lives exclusively
+> in the OS keychain (and optionally in an encrypted backup file). Do not commit
+> private keys or unencrypted backups to this repository.
+
+## Repository details
+
+| Field      | Value                    |
+|------------|--------------------------|
+| Public key | {PUBLIC_KEY} |
+| Device ID  | {DEVICE_ID} |
+
+## Restoring on a new machine
+
+1. Install enclaude.
+2. Clone this repository to {TICK}~/.enclaude/{TICK}:
+   {TICK}git clone <remote-url> ~/.enclaude{TICK}
+3. Import your private key into the keychain:
+   {TICK}enclaude key import{TICK}
+4. Decrypt and restore your Claude files:
+   {TICK}enclaude unseal{TICK}
+
+## Key recovery
+
+If the OS keychain entry is lost, restore from the passphrase-encrypted backup:
+
+{FENCE}
+enclaude key recover key.age.backup
+{FENCE}
+
+You will be prompted for the passphrase you set during {TICK}enclaude init{TICK}.
+
+## Daily use
+
+{FENCE}
+enclaude seal          # encrypt and commit changes
+enclaude push          # push to remote
+enclaude pull          # pull and decrypt latest
+enclaude status        # show unsealed changes not yet sealed
+{FENCE}
+`
+
+func buildReadme(publicKey, deviceID string) string {
+	return strings.NewReplacer(
+		"{PUBLIC_KEY}", publicKey,
+		"{DEVICE_ID}", deviceID,
+		"{TICK}", "`",
+		"{FENCE}", "```",
+	).Replace(readmeTemplate)
 }
