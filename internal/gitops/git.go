@@ -101,6 +101,12 @@ func (g *Git) RemoteRemove(name string) error {
 	return err
 }
 
+// RemoteSetURL updates the URL of an existing git remote.
+func (g *Git) RemoteSetURL(name, url string) error {
+	_, err := g.run("remote", "set-url", name, url)
+	return err
+}
+
 // CurrentBranch returns the current branch name.
 func (g *Git) CurrentBranch() (string, error) {
 	return g.run("rev-parse", "--abbrev-ref", "HEAD")
