@@ -111,6 +111,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}
 
+	// Write README
+	readme := buildReadme(identity.Recipient().String(), cfg.Seal.DeviceID)
+	if err := os.WriteFile(filepath.Join(sealDir, "README.md"), []byte(readme), 0644); err != nil {
+		return fmt.Errorf("writing README: %w", err)
+	}
+
 	// 7. Initial seal
 	fmt.Println("\nPerforming initial seal...")
 	stats, err := store.Seal(cfg, identity.Recipient(), flagVerbose, nil)
@@ -138,4 +144,48 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  1. enclaude remote add origin <url>   # set up sync remote")
 	fmt.Println("  2. enclaude hooks install              # enable auto-sync")
 	return nil
+}
+
+func buildReadme(publicKey, deviceID string) string {
+	tick := "`"
+	fence := "```"
+	return fmt.Sprintf(
+		"# enclaude seal store\n\n"+
+			"This repository contains an encrypted backup of a Claude Code configuration\n"+
+			"directory, managed by [enclaude](https://github.com/coredipper/enclaude).\n\n"+
+			"All files are encrypted with [age](https://age-encryption.org/) and cannot be\n"+
+			"read without the private key stored in the OS keychain on the originating device.\n\n"+
+			"> **Private keys are never stored here.** The age private key lives exclusively\n"+
+			"> in the OS keychain (and optionally in an encrypted backup file). Do not commit\n"+
+			"> private keys or unencrypted backups to this repository.\n\n"+
+			"## Repository details\n\n"+
+			"| Field      | Value                    |\n"+
+			"|------------|---------------------------|\n"+
+			"| Public key | %s |\n"+
+			"| Device ID  | %s |\n\n"+
+			"## Restoring on a new machine\n\n"+
+			"1. Install enclaude.\n"+
+			"2. Clone this repository to %s~/.enclaude/%s:\n"+
+			"   %sgit clone <remote-url> ~/.enclaude%s\n"+
+			"3. Import your private key into the keychain:\n"+
+			"   %senclaude key import%s\n"+
+			"4. Decrypt and restore your Claude files:\n"+
+			"   %senclaude unseal%s\n\n"+
+			"## Key recovery\n\n"+
+			"If the OS keychain entry is lost, restore from the passphrase-encrypted backup:\n\n"+
+			fence+"\n"+
+			"enclaude key recover key.age.backup\n"+
+			fence+"\n\n"+
+			"You will be prompted for the passphrase you set during %senclaude init%s.\n\n"+
+			"## Daily use\n\n"+
+			fence+"\n"+
+			"enclaude seal          # encrypt and commit changes\n"+
+			"enclaude push          # push to remote\n"+
+			"enclaude pull          # pull and decrypt latest\n"+
+			"enclaude status        # show unsealed changes not yet sealed\n"+
+			fence+"\n",
+		publicKey, deviceID,
+		tick, tick, tick, tick, tick, tick, tick, tick,
+		tick, tick,
+	)
 }
