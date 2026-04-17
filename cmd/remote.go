@@ -56,8 +56,40 @@ var remoteListCmd = &cobra.Command{
 	},
 }
 
+var remoteRemoveCmd = &cobra.Command{
+	Use:   "remove <name>",
+	Short: "Remove a git remote",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		git := gitops.New(getSealDir())
+		name := args[0]
+		if err := git.RemoteRemove(name); err != nil {
+			return fmt.Errorf("removing remote: %w", err)
+		}
+		fmt.Printf("Remote '%s' removed.\n", name)
+		return nil
+	},
+}
+
+var remoteEditCmd = &cobra.Command{
+	Use:   "edit <name> <url>",
+	Short: "Update the URL of an existing git remote",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		git := gitops.New(getSealDir())
+		name, url := args[0], args[1]
+		if err := git.RemoteSetURL(name, url); err != nil {
+			return fmt.Errorf("editing remote: %w", err)
+		}
+		fmt.Printf("Remote '%s' updated: %s\n", name, url)
+		return nil
+	},
+}
+
 func init() {
 	remoteCmd.AddCommand(remoteAddCmd)
 	remoteCmd.AddCommand(remoteListCmd)
+	remoteCmd.AddCommand(remoteRemoveCmd)
+	remoteCmd.AddCommand(remoteEditCmd)
 	rootCmd.AddCommand(remoteCmd)
 }
