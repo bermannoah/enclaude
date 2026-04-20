@@ -284,7 +284,7 @@ func TestMergeJSONLISOTimestampsInterleavedChronologicalOrder(t *testing.T) {
 }
 
 func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
-	ours := []byte(`{"version": 1}`)
+	ours := []byte(`{"version": 2}`)
 	theirs := []byte(`{"version": 1, "entries": [{"sessionId": "s1"}]}`)
 
 	merged, err := MergeSessionsIndex(ours, theirs)
@@ -293,6 +293,15 @@ func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
 	}
 	if !strings.Contains(string(merged), "s1") {
 		t.Error("expected entry from theirs in merged output when ours has no entries key")
+	}
+
+	// ours takes precedence for shared top-level keys — version must come from ours.
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(merged, &out); err != nil {
+		t.Fatalf("merged output is not valid JSON: %v", err)
+	}
+	if string(out["version"]) != "2" {
+		t.Errorf("expected version=2 from ours, got %s", out["version"])
 	}
 }
 
