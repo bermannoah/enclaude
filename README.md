@@ -105,7 +105,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 ### Core
 | Command | Description |
 |---------|-------------|
-| `init` | Generate age keypair, store in OS keychain, initial seal |
+| `init` | Generate age keypair, store in OS keychain, initial seal, write README.md to seal store |
 | `seal` | Encrypt changed files, commit to seal store |
 | `unseal` | Decrypt seal store to `~/.claude/` |
 | `status` | Show changes since last seal |
@@ -137,6 +137,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `hooks install` | Add auto-sync hooks to Claude Code settings |
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
+| `readme-regen` | Regenerate and commit README.md in the seal store |
 
 ## Merge Strategies
 
