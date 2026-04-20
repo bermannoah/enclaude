@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -192,4 +193,146 @@ func nonEmptyLines(s string) []string {
 func parseTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
+}
+
+func TestMergeJSONLNonJSONLines(t *testing.T) {
+	ours := []byte("not valid json\n")
+	theirs := []byte("also not json\n")
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), string(merged))
+	}
+}
+
+func TestMergeJSONLNonJSONDeduplicated(t *testing.T) {
+	line := "not valid json"
+	ours := []byte(line + "\n")
+	theirs := []byte(line + "\n")
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 1 {
+		t.Fatalf("identical non-JSON lines should deduplicate to 1, got %d", len(lines))
+	}
+}
+
+func TestMergeJSONLISOTimestampsChronologicalOrder(t *testing.T) {
+	// ours has events a (Jan 1) and b (Jan 2); theirs has event c (Jan 3).
+	// After merge the three events must appear in chronological order
+	// regardless of which side each came from.
+	ours := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z"}
+{"event":"b","timestamp":"2024-01-02T00:00:00Z"}
+`)
+	theirs := []byte(`{"event":"c","timestamp":"2024-01-03T00:00:00Z"}
+`)
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %s", len(lines), string(merged))
+	}
+
+	// Verify chronological order by checking the "event" field sequence.
+	for i, want := range []string{"a", "b", "c"} {
+		var obj map[string]string
+		if err := json.Unmarshal([]byte(lines[i]), &obj); err != nil {
+			t.Fatalf("line %d is not valid JSON: %v", i, err)
+		}
+		if obj["event"] != want {
+			t.Errorf("line %d: got event=%q, want %q (full output: %s)", i, obj["event"], want, string(merged))
+		}
+	}
+}
+
+func TestMergeJSONLISOTimestampsInterleavedChronologicalOrder(t *testing.T) {
+	// Events interleaved across ours/theirs — Jan 1 in theirs, Jan 2 in ours.
+	// The sort must produce chronological order, not arrival order.
+	ours := []byte(`{"event":"b","timestamp":"2024-01-02T00:00:00Z"}
+`)
+	theirs := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z"}
+`)
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), string(merged))
+	}
+
+	var first map[string]string
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("line 0 is not valid JSON: %v", err)
+	}
+	if first["event"] != "a" {
+		t.Errorf("expected earlier event first, got event=%q (full output: %s)", first["event"], string(merged))
+	}
+}
+
+func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
+	ours := []byte(`{"version": 2}`)
+	theirs := []byte(`{"version": 1, "entries": [{"sessionId": "s1"}]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	if !strings.Contains(string(merged), "s1") {
+		t.Error("expected entry from theirs in merged output when ours has no entries key")
+	}
+
+	// ours takes precedence for shared top-level keys — version must come from ours.
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(merged, &out); err != nil {
+		t.Fatalf("merged output is not valid JSON: %v", err)
+	}
+	if string(out["version"]) != "2" {
+		t.Errorf("expected version=2 from ours, got %s", out["version"])
+	}
+}
+
+func TestMergeSessionsIndexNoSessionIdFallsBackToFullJSON(t *testing.T) {
+	ours := []byte(`{"entries": [{"name": "no-id-entry-a"}]}`)
+	theirs := []byte(`{"entries": [{"name": "no-id-entry-b"}]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	s := string(merged)
+	if !strings.Contains(s, "no-id-entry-a") {
+		t.Error("expected no-id-entry-a in merged output")
+	}
+	if !strings.Contains(s, "no-id-entry-b") {
+		t.Error("expected no-id-entry-b in merged output")
+	}
+}
+
+func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
+	entry := `{"sessionId":"same-id","name":"session"}`
+	ours := []byte(`{"entries": [` + entry + `]}`)
+	theirs := []byte(`{"entries": [` + entry + `]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	count := strings.Count(string(merged), "same-id")
+	if count != 1 {
+		t.Errorf("expected sessionId to appear once, got %d times", count)
+	}
 }
