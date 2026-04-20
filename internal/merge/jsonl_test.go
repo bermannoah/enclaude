@@ -193,3 +193,100 @@ func parseTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
 }
+
+func TestMergeJSONLNonJSONLines(t *testing.T) {
+	ours := []byte("not valid json\n")
+	theirs := []byte("also not json\n")
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), string(merged))
+	}
+}
+
+func TestMergeJSONLNonJSONDeduplicated(t *testing.T) {
+	line := "not valid json"
+	ours := []byte(line + "\n")
+	theirs := []byte(line + "\n")
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 1 {
+		t.Fatalf("identical non-JSON lines should deduplicate to 1, got %d", len(lines))
+	}
+}
+
+func TestMergeJSONLISOTimestampsStableOutput(t *testing.T) {
+	ours := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z"}
+{"event":"b","timestamp":"2024-01-02T00:00:00Z"}
+`)
+	theirs := []byte(`{"event":"c","timestamp":"2024-01-03T00:00:00Z"}
+`)
+
+	result1, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("first MergeJSONL() error: %v", err)
+	}
+	result2, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("second MergeJSONL() error: %v", err)
+	}
+	if string(result1) != string(result2) {
+		t.Error("ISO timestamp merge should produce deterministic output across calls")
+	}
+	if len(nonEmptyLines(string(result1))) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(nonEmptyLines(string(result1))))
+	}
+}
+
+func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
+	ours := []byte(`{"version": 1}`)
+	theirs := []byte(`{"version": 1, "entries": [{"sessionId": "s1"}]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	if !strings.Contains(string(merged), "s1") {
+		t.Error("expected entry from theirs in merged output when ours has no entries key")
+	}
+}
+
+func TestMergeSessionsIndexNoSessionIdFallsBackToFullJSON(t *testing.T) {
+	ours := []byte(`{"entries": [{"name": "no-id-entry-a"}]}`)
+	theirs := []byte(`{"entries": [{"name": "no-id-entry-b"}]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	s := string(merged)
+	if !strings.Contains(s, "no-id-entry-a") {
+		t.Error("expected no-id-entry-a in merged output")
+	}
+	if !strings.Contains(s, "no-id-entry-b") {
+		t.Error("expected no-id-entry-b in merged output")
+	}
+}
+
+func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
+	entry := `{"sessionId":"same-id","name":"session"}`
+	ours := []byte(`{"entries": [` + entry + `]}`)
+	theirs := []byte(`{"entries": [` + entry + `]}`)
+
+	merged, err := MergeSessionsIndex(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	count := strings.Count(string(merged), "same-id")
+	if count != 1 {
+		t.Errorf("expected sessionId to appear once, got %d times", count)
+	}
+}
