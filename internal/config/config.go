@@ -168,16 +168,14 @@ func claudeMergeStrategies() map[string]string {
 
 func piIncludePatterns() []string {
 	return []string{
-		// User configuration and credentials.
+		// User configuration. Credentials (auth.json, oauth.json,
+		// mcp-auth.json) and trust.json are deliberately excluded: they are
+		// device-local secrets and security decisions, not portable config.
 		"settings.json",
 		"models.json",
 		"models-store.json",
 		"keybindings.json",
 		"mcp.json",
-		"auth.json",
-		"oauth.json",
-		"mcp-auth.json",
-		"trust.json",
 		// Instructions and prompt overrides.
 		"AGENTS.md",
 		"AGENTS.override.md",
@@ -210,6 +208,13 @@ func piExcludePatterns() []string {
 		// deleting a freshly installed hook before the first seal.
 		"extensions/enclaude.ts",
 		"extensions/enclaude/**",
+		// Credentials and trust decisions are device-local secrets/security
+		// state and are never sealed. See the README for how to pair
+		// credentials with enclaude.
+		"auth.json",
+		"oauth.json",
+		"mcp-auth.json",
+		"trust.json",
 		// Machine-local diagnostics and logs.
 		"crashes.json",
 		"diagnostics.json",
@@ -236,10 +241,6 @@ func piMergeStrategies() map[string]string {
 		"models-store.json": "last_write_wins",
 		"keybindings.json":  "last_write_wins",
 		"mcp.json":          "last_write_wins",
-		"auth.json":         "last_write_wins",
-		"oauth.json":        "last_write_wins",
-		"mcp-auth.json":     "last_write_wins",
-		"trust.json":        "last_write_wins",
 		// Human-authored resources merge as text.
 		"**/*.md": "text_merge",
 		"**/*.ts": "text_merge",

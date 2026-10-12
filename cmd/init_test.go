@@ -51,7 +51,7 @@ func TestBuildReadme(t *testing.T) {
 			publicKey: "age1abc",
 			deviceID:  "host-1234",
 			contains: []string{
-				"`enclaude unseal`",
+				"`enclaude unseal --yes`",
 				"```",
 			},
 			absent: []string{

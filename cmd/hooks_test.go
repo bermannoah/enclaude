@@ -15,11 +15,14 @@ func TestResolveHookTargetInfersPiFromConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prevSeal, prevSource := flagSealDir, flagSource
-	flagSealDir, flagSource = sealDir, ""
-	defer func() { flagSealDir, flagSource = prevSeal, prevSource }()
+	prevSeal, prevSource, prevSourceDir := flagSealDir, flagSource, flagSourceDir
+	flagSealDir, flagSource, flagSourceDir = sealDir, "", "/tmp/pi-agent-dir"
+	defer func() { flagSealDir, flagSource, flagSourceDir = prevSeal, prevSource, prevSourceDir }()
 
-	source, dir := resolveHookTarget()
+	source, dir, err := resolveHookTarget()
+	if err != nil {
+		t.Fatalf("resolveHookTarget() error: %v", err)
+	}
 	if source != config.SourcePi {
 		t.Errorf("source = %q, want %q", source, config.SourcePi)
 	}

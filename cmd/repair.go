@@ -6,13 +6,13 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	repairCheck        bool
+	repairCheck         bool
 	repairDeleteOrphans bool
 )
 
@@ -38,9 +38,11 @@ func runRepair(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagSourceDir != "" {
-		cfg.Seal.SourceDir = flagSourceDir
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		return err
 	}
+	cfg.Seal.SourceDir = sourceDir
 
 	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
@@ -54,7 +56,7 @@ func runRepair(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		printRepairResult(result)
-		if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 {
+		if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 || len(result.InvalidEntries) > 0 {
 			os.Exit(1)
 		}
 		return nil
@@ -92,6 +94,13 @@ func printRepairResult(r *store.RepairResult) {
 		}
 	}
 
+	if len(r.InvalidEntries) > 0 {
+		fmt.Printf("\n%s Unsafe manifest entries (%d):\n", ui.Red("!"), len(r.InvalidEntries))
+		for _, path := range r.InvalidEntries {
+			fmt.Printf("  %s %s\n", ui.Red("unsafe"), path)
+		}
+	}
+
 	if len(r.OrphanObjects) > 0 {
 		fmt.Printf("\n%s Orphan objects (%d):\n", ui.Yellow("?"), len(r.OrphanObjects))
 		for _, hash := range r.OrphanObjects {
@@ -99,7 +108,7 @@ func printRepairResult(r *store.RepairResult) {
 		}
 	}
 
-	if len(r.MissingObjects) == 0 && len(r.CorruptObjects) == 0 && len(r.OrphanObjects) == 0 {
+	if len(r.MissingObjects) == 0 && len(r.CorruptObjects) == 0 && len(r.OrphanObjects) == 0 && len(r.InvalidEntries) == 0 {
 		fmt.Printf("\n%s Seal integrity verified. No issues found.\n", ui.Green("OK"))
 	}
 }

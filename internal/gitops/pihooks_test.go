@@ -34,6 +34,7 @@ func TestInstallPiHooksCreatesExtension(t *testing.T) {
 		`"session-end"`,
 		`"--source"`,
 		`"--seal-dir"`,
+		`"--source-dir"`,
 		`"/tmp/seal"`,
 	} {
 		if !strings.Contains(src, want) {
@@ -46,6 +47,30 @@ func TestInstallPiHooksCreatesExtension(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Errorf("extension should resolve the binary at runtime (missing %q)", want)
 		}
+	}
+}
+
+func TestInstallPiHooksRefusesForeignFile(t *testing.T) {
+	dir := t.TempDir()
+	extDir := filepath.Join(dir, "extensions")
+	if err := os.MkdirAll(extDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := PiExtensionPath(dir)
+	original := []byte("// my own extension, not enclaude's\n")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallPiHooks(dir, "/tmp/seal"); err == nil {
+		t.Fatal("expected InstallPiHooks() to refuse a non-enclaude extension")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Error("foreign extension was modified")
 	}
 }
 

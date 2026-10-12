@@ -81,7 +81,11 @@ func TestVerifyDetectsMissingObject(t *testing.T) {
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
 	entry := manifest.Files["history.jsonl"]
-	os.Remove(store.ObjectPath(entry.ContentHash))
+	objPath, err := store.objectPath(entry.ContentHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(objPath)
 
 	result, err := Verify(cfg, identity, false)
 	if err != nil {
@@ -130,7 +134,11 @@ func TestRepairFixesMissing(t *testing.T) {
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
 	deletedPath := "history.jsonl"
-	os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash))
+	objPath, err := store.objectPath(manifest.Files[deletedPath].ContentHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(objPath)
 
 	// Repair should re-seal from plaintext
 	result, err := Repair(cfg, identity, false, false)
@@ -165,7 +173,11 @@ func TestRepairUpdatesManifestWhenPlaintextChanged(t *testing.T) {
 	store := NewObjectStore(sealDir)
 	deletedPath := "history.jsonl"
 	oldHash := manifest.Files[deletedPath].ContentHash
-	os.Remove(store.ObjectPath(oldHash))
+	objPath, err := store.objectPath(oldHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(objPath)
 
 	// Modify the plaintext so its hash will differ from manifest
 	newContent := []byte("completely new content after modification")
@@ -247,7 +259,7 @@ func TestRotateReEncrypts(t *testing.T) {
 	// Verify full round-trip: unseal with new key to fresh dir
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfig(restoreDir, sealDir)
-	stats, err := Unseal(cfg2, newIdentity, false, nil)
+	stats, err := Unseal(cfg2, newIdentity, UnsealOptions{AllowExecutableResources: true})
 	if err != nil {
 		t.Fatalf("Unseal with new key error: %v", err)
 	}

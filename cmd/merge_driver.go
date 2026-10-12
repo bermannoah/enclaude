@@ -75,6 +75,15 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("parsing theirs manifest: %w", err)
 	}
 
+	// Never propagate unsafe manifest entries through a merge. Unseal refuses
+	// them anyway, but dropping them here keeps the merged manifest clean.
+	for name, m := range map[string]*sealstore.Manifest{"ours": &ours, "theirs": &theirs} {
+		for _, path := range m.InvalidEntries() {
+			fmt.Fprintf(os.Stderr, "  [skip] %s: unsafe manifest entry %q\n", name, path)
+			delete(m.Files, path)
+		}
+	}
+
 	objStore := sealstore.NewObjectStore(sealDir)
 	merged := sealstore.Manifest{
 		Version:  ours.Version,

@@ -6,6 +6,7 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,9 +29,11 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	if flagSourceDir != "" {
-		cfg.Seal.SourceDir = flagSourceDir
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		return err
 	}
+	cfg.Seal.SourceDir = sourceDir
 
 	if flagDryRun {
 		fmt.Println("(dry run — showing what would change)")
@@ -63,15 +66,31 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	stats, err := store.Unseal(cfg, identity, flagVerbose, nil)
+	stats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: flagYes})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("  %s\n", stats)
+
+	warnSkippedExecutable(stats)
 
 	if stats.Errors > 0 {
 		fmt.Printf("  Warning: %d errors encountered.\n", stats.Errors)
 	}
 
 	return nil
+}
+
+// warnSkippedExecutable prints the executable resources that were not written
+// because the user did not pass --yes.
+func warnSkippedExecutable(stats store.UnsealStats) {
+	if len(stats.SkippedExecutable) == 0 {
+		return
+	}
+	fmt.Printf("\n%s %d executable resource(s) were not written because they can run code or inject context:\n",
+		ui.Yellow("Skipped:"), len(stats.SkippedExecutable))
+	for _, p := range stats.SkippedExecutable {
+		fmt.Printf("  - %s\n", p)
+	}
+	fmt.Println("Review the remote changes, then re-run with 'enclaude unseal --yes' to apply them.")
 }

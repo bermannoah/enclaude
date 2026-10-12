@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
@@ -39,26 +40,46 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(filepath.Join(sealDir, "seal.toml")); err == nil {
 		return fmt.Errorf("seal store already initialized at %s", sealDir)
 	}
+	// Refuse to re-initialize over an existing manifest: a freshly generated key
+	// cannot decrypt the objects it references, and Seal would skip re-encrypting
+	// unchanged files. Recover such a store with 'enclaude key import' instead.
+	if _, err := os.Stat(filepath.Join(sealDir, "manifest.json")); err == nil {
+		return fmt.Errorf("seal store data already exists at %s (manifest.json present); import the existing key with 'enclaude key import' instead of re-initializing", sealDir)
+	}
 
 	fmt.Println("Initializing enclaude...")
 	fmt.Printf("  Source:    %s\n", source)
 	fmt.Printf("  Source dir: %s\n", sourceDir)
 	fmt.Printf("  Seal dir:   %s\n", sealDir)
 
-	// 1. Generate a fresh age keypair for this seal store.
-	fmt.Println("\nGenerating age keypair...")
-	identity, err := crypto.GenerateKey()
-	if err != nil {
-		return fmt.Errorf("generating key: %w", err)
-	}
-	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	// 1. Pick the key for this store. ENCLAUDE_KEY overrides everything, so when
+	// it is set init must use it (a generated key would be shadowed by the env
+	// var on every later command). Otherwise generate a fresh keypair.
+	var identity *age.X25519Identity
+	if envKey := os.Getenv("ENCLAUDE_KEY"); envKey != "" {
+		id, err := crypto.ParseIdentity(envKey)
+		if err != nil {
+			return fmt.Errorf("parsing ENCLAUDE_KEY: %w", err)
+		}
+		identity = id
+		fmt.Println("\nUsing key from ENCLAUDE_KEY.")
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	} else {
+		fmt.Println("\nGenerating age keypair...")
+		id, err := crypto.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("generating key: %w", err)
+		}
+		identity = id
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
 
-	// 2. Store in OS keychain, scoped to this seal store.
-	fmt.Println("Storing private key in OS keychain...")
-	if err := crypto.StoreKey(sealDir, identity); err != nil {
-		return fmt.Errorf("storing key in keychain: %w", err)
+		// 2. Store in OS keychain, scoped to this seal store.
+		fmt.Println("Storing private key in OS keychain...")
+		if err := crypto.StoreKey(sealDir, identity); err != nil {
+			return fmt.Errorf("storing key in keychain: %w", err)
+		}
+		fmt.Println("  Stored in keychain.")
 	}
-	fmt.Println("  Stored in keychain.")
 
 	// 3. Create seal directory
 	if err := os.MkdirAll(sealDir, 0700); err != nil {
@@ -175,8 +196,9 @@ read without the private key stored in the OS keychain on the originating device
    {TICK}git clone <remote-url> {SEAL_DIR}{TICK}
 3. Import your private key into the keychain:
    {TICK}enclaude key import{TICK}
-4. Decrypt and restore your {SOURCE_NAME} files:
-   {TICK}enclaude unseal{TICK}
+4. Decrypt and restore your {SOURCE_NAME} files. Use {TICK}--yes{TICK} to also
+   apply settings and other executable resources (they are skipped by default):
+   {TICK}enclaude unseal --yes{TICK}
 5. Reinstall auto-sync hooks on this device:
    {TICK}enclaude hooks install{TICK}
 

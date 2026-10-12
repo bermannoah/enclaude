@@ -20,7 +20,6 @@ func buildPiDir(t *testing.T) string {
 		"models-store.json":      `{"deepseek":{"models":[]}}`,
 		"keybindings.json":       `{}`,
 		"mcp.json":               `{"mcpServers":{}}`,
-		"auth.json":              `{"deepseek":{"type":"api_key"}}`,
 		"AGENTS.md":              "# user instructions\n",
 		"extensions/hello.ts":    "export default function () {}\n",
 		"skills/review/SKILL.md": "# review\n",
@@ -35,6 +34,11 @@ func buildPiDir(t *testing.T) string {
 		".models.json.swp":              "vim swap",
 		// The enclaude hook extension is device-local and must not be sealed.
 		"extensions/enclaude.ts": "// enclaude-managed\n",
+		// Credentials and trust decisions are device-local and must not be sealed.
+		"auth.json":     `{"deepseek":{"type":"api_key"}}`,
+		"oauth.json":    `{}`,
+		"mcp-auth.json": `{}`,
+		"trust.json":    `{}`,
 	}
 
 	for rel, content := range files {
@@ -75,7 +79,6 @@ func TestPiSealUnsealRoundTrip(t *testing.T) {
 	included := []string{
 		"settings.json",
 		"models.json",
-		"auth.json",
 		"AGENTS.md",
 		"extensions/hello.ts",
 		"skills/review/SKILL.md",
@@ -94,6 +97,10 @@ func TestPiSealUnsealRoundTrip(t *testing.T) {
 		"crashes.json",
 		".models.json.swp",
 		"extensions/enclaude.ts",
+		"auth.json",
+		"oauth.json",
+		"mcp-auth.json",
+		"trust.json",
 	}
 	for _, rel := range excluded {
 		if _, ok := manifest.Files[rel]; ok {
@@ -113,7 +120,7 @@ func TestPiSealUnsealRoundTrip(t *testing.T) {
 	// Round-trip into a fresh directory.
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
-	unsealStats, err := Unseal(cfg2, identity, false, nil)
+	unsealStats, err := Unseal(cfg2, identity, UnsealOptions{AllowExecutableResources: true})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -195,7 +202,6 @@ func TestPiMergeStrategyResolution(t *testing.T) {
 		{"settings.json", "last_write_wins"},
 		{"models.json", "last_write_wins"},
 		{"models-store.json", "last_write_wins"},
-		{"auth.json", "last_write_wins"},
 		{"sessions/--Users-aura-code-proj--/2026-01-01T00-00-00-000Z_abc.jsonl", "immutable"},
 		{"extensions/hello.ts", "text_merge"},
 		{"extensions/nested/index.js", "text_merge"},

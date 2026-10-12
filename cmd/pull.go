@@ -33,9 +33,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagSourceDir != "" {
-		cfg.Seal.SourceDir = flagSourceDir
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		return err
 	}
+	cfg.Seal.SourceDir = sourceDir
 
 	git := gitops.New(sealDir)
 
@@ -98,11 +100,13 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil)
+	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: flagYes})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("  %s\n", unsealStats)
+
+	warnSkippedExecutable(unsealStats)
 
 	return nil
 }

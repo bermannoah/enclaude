@@ -52,7 +52,7 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	if err := InstallHooks(dir); err != nil {
+	if err := InstallHooks(dir, "/tmp/seal"); err != nil {
 		t.Fatalf("InstallHooks() error: %v", err)
 	}
 
@@ -82,8 +82,8 @@ func TestInstallHooksIdempotent(t *testing.T) {
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	InstallHooks(dir)
-	InstallHooks(dir)
+	InstallHooks(dir, "/tmp/seal")
+	InstallHooks(dir, "/tmp/seal")
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	count := strings.Count(string(result), hookMarker)
@@ -127,7 +127,7 @@ func TestInstallHooksMigratesLegacy(t *testing.T) {
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	if err := InstallHooks(dir); err != nil {
+	if err := InstallHooks(dir, "/tmp/seal"); err != nil {
 		t.Fatalf("InstallHooks() error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestRemoveHooksPreservesOthers(t *testing.T) {
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	InstallHooks(dir)
+	InstallHooks(dir, "/tmp/seal")
 
 	if !HooksInstalled(dir) {
 		t.Fatal("hooks should be installed")
@@ -219,8 +219,11 @@ func TestShellQuoteHandlesSpaces(t *testing.T) {
 	}
 	defer func() { resolveExecutable = old }()
 
-	cmd := sealHookCommand()
-	if cmd != "'/path with spaces/enclaude' hook-handler" {
+	cmd := sealHookCommand("/tmp/claude", "/tmp/seal")
+	if !strings.Contains(cmd, "'/path with spaces/enclaude'") {
+		t.Errorf("executable not shell-quoted: %s", cmd)
+	}
+	if !strings.HasSuffix(cmd, "hook-handler") {
 		t.Errorf("unexpected command: %s", cmd)
 	}
 }
@@ -232,10 +235,10 @@ func TestShellQuoteHandlesSingleQuotes(t *testing.T) {
 	}
 	defer func() { resolveExecutable = old }()
 
-	cmd := sealHookCommand()
-	expected := `'/it'\''s/enclaude' hook-handler`
-	if cmd != expected {
-		t.Errorf("unexpected command: got %s, want %s", cmd, expected)
+	cmd := sealHookCommand("/tmp/claude", "/tmp/seal")
+	expected := `'/it'\''s/enclaude'`
+	if !strings.Contains(cmd, expected) {
+		t.Errorf("unexpected command: got %s, want it to contain %s", cmd, expected)
 	}
 }
 
@@ -246,8 +249,8 @@ func TestSymlinkNotResolved(t *testing.T) {
 	}
 	defer func() { resolveExecutable = old }()
 
-	cmd := sealHookCommand()
-	if cmd != "'/opt/homebrew/bin/enclaude' hook-handler" {
+	cmd := sealHookCommand("/tmp/claude", "/tmp/seal")
+	if !strings.Contains(cmd, "'/opt/homebrew/bin/enclaude'") {
 		t.Errorf("unexpected command (symlink may have been resolved): %s", cmd)
 	}
 }
@@ -338,7 +341,7 @@ func TestMigrateLegacyHooks(t *testing.T) {
 	otherData, _ := json.Marshal(otherEntries)
 	hooks["PreToolUse"] = otherData
 
-	n := migrateLegacyHooks(hooks)
+	n := migrateLegacyHooks(hooks, "/tmp/claude", "/tmp/seal")
 	if n != 1 {
 		t.Errorf("expected 1 migration, got %d", n)
 	}
@@ -364,20 +367,20 @@ func TestMigrateLegacySkipsAlreadyMigrated(t *testing.T) {
 	entries := []hookEntry{
 		{Hooks: []hookDef{{
 			Type:    "command",
-			Command: sealHookFull("session-start"),
+			Command: sealHookFull("/tmp/claude", "/tmp/seal", "session-start"),
 		}}},
 	}
 	data, _ := json.Marshal(entries)
 	hooks["SessionStart"] = data
 
-	n := migrateLegacyHooks(hooks)
+	n := migrateLegacyHooks(hooks, "/tmp/claude", "/tmp/seal")
 	if n != 0 {
 		t.Errorf("expected 0 migrations for already-migrated hooks, got %d", n)
 	}
 }
 
 func TestSealHookFullIncludesMarker(t *testing.T) {
-	cmd := sealHookFull("session-start")
+	cmd := sealHookFull("/tmp/claude", "/tmp/seal", "session-start")
 	if !strings.Contains(cmd, hookMarker) {
 		t.Errorf("sealHookFull missing marker: %s", cmd)
 	}
@@ -386,6 +389,12 @@ func TestSealHookFullIncludesMarker(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "/usr/local/bin/enclaude") {
 		t.Errorf("sealHookFull missing executable path: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--seal-dir '/tmp/seal'") {
+		t.Errorf("sealHookFull missing seal dir: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--source-dir '/tmp/claude'") {
+		t.Errorf("sealHookFull missing source dir: %s", cmd)
 	}
 }
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/coredipper/enclaude/internal/config"
@@ -58,6 +59,13 @@ func handleSessionStart() error {
 		return nil
 	}
 
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		logHook("source dir error: %v", err)
+		return nil
+	}
+	cfg.Seal.SourceDir = sourceDir
+
 	// Acquire lock with short timeout — don't block Claude startup
 	lock := session.NewSealLock(sealDir)
 	acquired, err := lock.Acquire(lockTimeout)
@@ -86,9 +94,13 @@ func handleSessionStart() error {
 		return nil
 	}
 
-	_, err = store.Unseal(cfg, identity, false, nil)
+	stats, err := store.Unseal(cfg, identity, store.UnsealOptions{})
 	if err != nil {
 		logHook("unseal error: %v", err)
+	}
+	if len(stats.SkippedExecutable) > 0 {
+		logHook("skipped %d executable resource(s) pending confirmation; run 'enclaude unseal --yes': %s",
+			len(stats.SkippedExecutable), strings.Join(stats.SkippedExecutable, ", "))
 	}
 
 	return nil
@@ -110,6 +122,13 @@ func handleSessionEnd() error {
 	if !cfg.Sync.AutoSealOnSessionEnd {
 		return nil
 	}
+
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		logHook("source dir error: %v", err)
+		return nil
+	}
+	cfg.Seal.SourceDir = sourceDir
 
 	// Acquire lock
 	lock := session.NewSealLock(sealDir)

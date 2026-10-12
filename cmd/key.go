@@ -170,9 +170,9 @@ func rotateSealStore(sealDir string, oldIdentity, newIdentity *age.X25519Identit
 	if err != nil {
 		return fmt.Errorf("verifying %s: %w", sealDir, err)
 	}
-	if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 {
-		return fmt.Errorf("refusing to rotate: %s is not fully readable with the current key (%d missing, %d corrupt objects)",
-			sealDir, len(result.MissingObjects), len(result.CorruptObjects))
+	if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 || len(result.InvalidEntries) > 0 {
+		return fmt.Errorf("refusing to rotate: %s is not fully readable with the current key (%d missing, %d corrupt, %d unsafe objects)",
+			sealDir, len(result.MissingObjects), len(result.CorruptObjects), len(result.InvalidEntries))
 	}
 
 	rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), verbose, nil)

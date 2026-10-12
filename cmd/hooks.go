@@ -24,7 +24,10 @@ Claude Code hooks are written to <source-dir>/settings.json. pi.dev hooks are
 installed as a managed extension at <source-dir>/extensions/enclaude.ts.
 Existing settings and extensions are preserved.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source, dir := resolveHookTarget()
+		source, dir, err := resolveHookTarget()
+		if err != nil {
+			return err
+		}
 
 		if source == config.SourcePi {
 			if gitops.PiHooksInstalled(dir) {
@@ -48,7 +51,7 @@ Existing settings and extensions are preserved.`,
 		}
 
 		fmt.Println("Installing seal hooks into settings.json...")
-		if err := gitops.InstallHooks(dir); err != nil {
+		if err := gitops.InstallHooks(dir, getSealDir()); err != nil {
 			return fmt.Errorf("installing hooks: %w", err)
 		}
 
@@ -63,7 +66,10 @@ var hooksRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove seal hooks from the configured agent",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source, dir := resolveHookTarget()
+		source, dir, err := resolveHookTarget()
+		if err != nil {
+			return err
+		}
 
 		if source == config.SourcePi {
 			if !gitops.PiHooksInstalled(dir) {
@@ -97,7 +103,10 @@ var hooksStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check if seal hooks are installed",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source, dir := resolveHookTarget()
+		source, dir, err := resolveHookTarget()
+		if err != nil {
+			return err
+		}
 
 		installed := false
 		if source == config.SourcePi {
@@ -117,15 +126,21 @@ var hooksStatusCmd = &cobra.Command{
 }
 
 // resolveHookTarget prefers the source recorded in the seal store so hooks are
-// installed into the right agent even when the source flag is omitted.
-func resolveHookTarget() (source, dir string) {
+// installed into the right agent even when the source flag is omitted. It fails
+// closed on a non-default source_dir that the user has not confirmed locally.
+func resolveHookTarget() (source, dir string, err error) {
 	sealDir := getSealDir()
-	if _, err := os.Stat(filepath.Join(sealDir, "seal.toml")); err == nil {
-		if cfg, err := config.Load(sealDir); err == nil {
-			return cfg.Source(), cfg.Seal.SourceDir
+	if _, statErr := os.Stat(filepath.Join(sealDir, "seal.toml")); statErr == nil {
+		cfg, loadErr := config.Load(sealDir)
+		if loadErr == nil {
+			dir, err := resolveSourceDir(cfg)
+			if err != nil {
+				return "", "", err
+			}
+			return cfg.Source(), dir, nil
 		}
 	}
-	return getSource(), getSourceDir()
+	return getSource(), getSourceDir(), nil
 }
 
 func init() {

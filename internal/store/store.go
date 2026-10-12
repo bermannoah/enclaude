@@ -2,9 +2,11 @@ package store
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,15 +46,99 @@ type UnsealStats struct {
 	Unchanged int
 	Deleted   int
 	Errors    int
+	// SkippedExecutable lists executable resources that were not written
+	// because the caller did not allow it (UnsealOptions.AllowExecutableResources).
+	SkippedExecutable []string
 }
 
 func (s UnsealStats) String() string {
-	if s.Deleted > 0 {
-		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d deleted",
-			s.Total, s.Restored, s.Unchanged, s.Deleted)
-	}
-	return fmt.Sprintf("%d files: %d restored, %d unchanged",
+	base := fmt.Sprintf("%d files: %d restored, %d unchanged",
 		s.Total, s.Restored, s.Unchanged)
+	if s.Deleted > 0 {
+		base += fmt.Sprintf(", %d deleted", s.Deleted)
+	}
+	if len(s.SkippedExecutable) > 0 {
+		base += fmt.Sprintf(", %d executable resources skipped (need --yes)", len(s.SkippedExecutable))
+	}
+	return base
+}
+
+// UnsealOptions configures an unseal.
+type UnsealOptions struct {
+	Verbose bool
+	// AllowExecutableResources permits writing executable resources
+	// (settings.json, mcp.json, extensions/, tools/, skills/, prompts/,
+	// commands/). When false, such files are left untouched and reported in
+	// UnsealStats.SkippedExecutable. This gates auto-unseal from applying code
+	// delivered by a remote until the user explicitly confirms with --yes.
+	AllowExecutableResources bool
+	Progress                 ProgressFunc
+}
+
+// IsExecutableResource reports whether relPath is a resource that an agent
+// executes, or that can inject commands or context into it. These are gated on
+// unseal so a compromised remote cannot push code that runs automatically.
+func IsExecutableResource(relPath string) bool {
+	for _, pattern := range []string{
+		"settings.json",
+		"mcp.json",
+		"extensions/**",
+		"tools/**",
+		"skills/**",
+		"prompts/**",
+		"commands/**",
+	} {
+		if MatchGlob(relPath, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingFile holds paths whose remote executable version was skipped during an
+// unseal. It lives under .git so it is never committed or synced.
+func pendingFile(sealDir string) string {
+	gitDir := filepath.Join(sealDir, ".git")
+	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		return filepath.Join(gitDir, "enclaude-pending.json")
+	}
+	return filepath.Join(sealDir, ".enclaude-pending.json")
+}
+
+func loadPending(sealDir string) map[string]bool {
+	data, err := os.ReadFile(pendingFile(sealDir))
+	if err != nil {
+		return map[string]bool{}
+	}
+	var paths []string
+	if err := json.Unmarshal(data, &paths); err != nil {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		out[p] = true
+	}
+	return out
+}
+
+func savePending(sealDir string, pending map[string]bool) error {
+	path := pendingFile(sealDir)
+	if len(pending) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	paths := make([]string, 0, len(pending))
+	for p := range pending {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	data, err := json.MarshalIndent(paths, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
 // ProgressFunc is called during long operations to report progress.
@@ -153,24 +239,47 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 
 		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:    hash,
-			SizePlaintext:  f.Size,
-			SizeEncrypted:  int64(len(encrypted)),
-			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount: lineCount,
+			ContentHash:     hash,
+			SizePlaintext:   f.Size,
+			SizeEncrypted:   int64(len(encrypted)),
+			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionComplete(f.RelPath),
 		}
 	}
 
-	// Mark deleted files
+	// Mark deleted files. Paths that are pending (remote executable resources
+	// intentionally skipped on unseal) are kept in the manifest so a later seal
+	// does not mistake the missing local file for a deletion and drop it.
+	pending := loadPending(sealDir)
 	for path := range manifest.Files {
 		if !seen[path] {
+			if pending[path] {
+				continue
+			}
 			if verbose {
 				fmt.Printf("  [del] %s\n", path)
 			}
 			delete(manifest.Files, path)
 			stats.Deleted++
+		}
+	}
+
+	// Pending paths that now exist locally (sealed, unchanged, or manually
+	// recreated) or were removed from the manifest are no longer pending.
+	if len(pending) > 0 {
+		for path := range pending {
+			if seen[path] {
+				delete(pending, path)
+				continue
+			}
+			if _, inManifest := manifest.Files[path]; !inManifest {
+				delete(pending, path)
+			}
+		}
+		if err := savePending(sealDir, pending); err != nil {
+			return stats, fmt.Errorf("saving pending state: %w", err)
 		}
 	}
 
@@ -186,9 +295,13 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	return stats, nil
 }
 
-// Unseal decrypts seal contents back to claudeDir and removes managed
-// files not in the manifest. The manifest is the source of truth.
-func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (UnsealStats, error) {
+// Unseal decrypts seal contents back to the source directory and removes
+// managed files not in the manifest. The manifest is the source of truth.
+//
+// Executable resources are only written when opts.AllowExecutableResources is
+// set; otherwise they are reported in UnsealStats.SkippedExecutable and recorded
+// as pending so a later seal does not mistake them for deletions.
+func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (UnsealStats, error) {
 	var stats UnsealStats
 	sealDir := cfg.Seal.SealDir
 
@@ -202,13 +315,22 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		return stats, fmt.Errorf("no manifest found — is the seal store initialized?")
 	}
 
+	// Refuse to write anything if the manifest contains unsafe entries. The
+	// manifest is read from the (possibly compromised) repository, so an entry
+	// such as "../../.ssh/authorized_keys" must never be joined with SourceDir.
+	if invalid := manifest.InvalidEntries(); len(invalid) > 0 {
+		return stats, fmt.Errorf("refusing to unseal: manifest contains %d unsafe entr%s: %s (run 'enclaude repair' to drop them)",
+			len(invalid), plural(len(invalid), "y", "ies"), strings.Join(invalid, ", "))
+	}
+
 	stats.Total = len(manifest.Files)
+	pending := loadPending(sealDir)
 
 	i := 0
 	for relPath, entry := range manifest.Files {
 		i++
-		if progress != nil {
-			progress(i, stats.Total, relPath)
+		if opts.Progress != nil {
+			opts.Progress(i, stats.Total, relPath)
 		}
 		absPath := filepath.Join(cfg.Seal.SourceDir, relPath)
 
@@ -216,14 +338,22 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if existing, err := os.ReadFile(absPath); err == nil {
 			if ContentHash(existing) == entry.ContentHash {
 				stats.Unchanged++
+				delete(pending, relPath)
 				continue
 			}
+		}
+
+		// Gate executable resources unless the caller explicitly allowed them.
+		if !opts.AllowExecutableResources && IsExecutableResource(relPath) {
+			stats.SkippedExecutable = append(stats.SkippedExecutable, relPath)
+			pending[relPath] = true
+			continue
 		}
 
 		// Read encrypted object
 		encrypted, err := store.Read(entry.ContentHash)
 		if err != nil {
-			if verbose {
+			if opts.Verbose {
 				fmt.Fprintf(os.Stderr, "  warning: missing object for %s: %v\n", relPath, err)
 			}
 			stats.Errors++
@@ -233,14 +363,14 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		// Decrypt
 		plaintext, err := crypto.Decrypt(encrypted, identity)
 		if err != nil {
-			if verbose {
+			if opts.Verbose {
 				fmt.Fprintf(os.Stderr, "  warning: cannot decrypt %s: %v\n", relPath, err)
 			}
 			stats.Errors++
 			continue
 		}
 
-		// Write to claude directory
+		// Write to the source directory
 		dir := filepath.Dir(absPath)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			stats.Errors++
@@ -251,10 +381,16 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			continue
 		}
 
-		if verbose {
+		delete(pending, relPath)
+		if opts.Verbose {
 			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
 		}
 		stats.Restored++
+	}
+
+	// Persist which executable resources are still pending confirmation.
+	if err := savePending(sealDir, pending); err != nil {
+		return stats, fmt.Errorf("saving pending state: %w", err)
 	}
 
 	// Delete managed files not in the manifest. The manifest is the source
@@ -266,7 +402,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	}
 	existingFiles, scanErr := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if scanErr != nil {
-		if verbose {
+		if opts.Verbose {
 			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
 		}
 		stats.Errors++
@@ -281,7 +417,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			if !manifestPaths[f.RelPath] {
 				if err := os.Remove(f.AbsPath); err == nil {
 					stats.Deleted++
-					if verbose {
+					if opts.Verbose {
 						fmt.Printf("  [delete] %s\n", f.RelPath)
 					}
 					dir := filepath.Dir(f.AbsPath)
@@ -290,7 +426,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 					}
 				} else {
 					stats.Errors++
-					if verbose {
+					if opts.Verbose {
 						fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
 					}
 				}
@@ -301,6 +437,13 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	return stats, nil
 }
 
+// plural picks singular or plural suffix for count.
+func plural(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {
@@ -476,6 +619,9 @@ type RepairResult struct {
 	MissingObjects []string // manifest entries with no .age file
 	CorruptObjects []string // objects that fail decrypt or hash mismatch
 	OrphanObjects  []string // .age files not in manifest
+	// InvalidEntries lists manifest keys with unsafe paths or hashes. They are
+	// never written on unseal and are dropped by Repair.
+	InvalidEntries []string
 	Fixed          int
 }
 
@@ -494,9 +640,14 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 	}
 
 	result.TotalManifest = len(manifest.Files)
+	result.InvalidEntries = manifest.InvalidEntries()
 
 	// Check all manifest entries have objects
 	for path, entry := range manifest.Files {
+		// Unsafe entries are reported separately and never read.
+		if ValidateRelPath(path) != nil || !ValidHash(entry.ContentHash) {
+			continue
+		}
 		if !store.Exists(entry.ContentHash) {
 			result.MissingObjects = append(result.MissingObjects, path)
 			if verbose {
@@ -564,6 +715,22 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	store := NewObjectStore(cfg.Seal.SealDir)
 
+	// Drop manifest entries with unsafe paths or hashes. They can never be
+	// applied and would otherwise block unseal until manually edited out.
+	if len(result.InvalidEntries) > 0 {
+		pending := loadPending(cfg.Seal.SealDir)
+		for _, path := range result.InvalidEntries {
+			delete(manifest.Files, path)
+			delete(pending, path)
+			if verbose {
+				fmt.Printf("  [dropped] %s (unsafe manifest entry)\n", path)
+			}
+		}
+		if err := savePending(cfg.Seal.SealDir, pending); err != nil {
+			return result, fmt.Errorf("saving pending state: %w", err)
+		}
+	}
+
 	// Track old hashes that get superseded during repair so we can
 	// include them in orphan deletion (they become orphaned only after
 	// the manifest is updated with new hashes).
@@ -620,7 +787,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	// Save updated manifest before deleting any objects — if save fails,
 	// the old manifest still has valid references to existing objects.
-	if result.Fixed > 0 {
+	if result.Fixed > 0 || len(result.InvalidEntries) > 0 {
 		if err := manifest.Save(cfg.Seal.SealDir); err != nil {
 			return result, fmt.Errorf("saving manifest: %w", err)
 		}

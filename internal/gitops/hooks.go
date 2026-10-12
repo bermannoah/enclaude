@@ -18,21 +18,27 @@ const hookMarker = "# enclaude-managed"
 var resolveExecutable = os.Executable
 
 // sealHookCommand returns the shell-safe absolute path to the enclaude binary
-// for use in hook commands. Hooks run via /bin/sh which may not have
-// ~/go/bin or other user-specific paths in PATH.
+// for use in hook commands, with the source and seal directories pinned so the
+// hook operates on the correct store regardless of the environment Claude Code
+// was launched from. Hooks run via /bin/sh which may not have ~/go/bin or other
+// user-specific paths in PATH.
 // We intentionally do NOT resolve symlinks: symlinks (e.g. from Homebrew)
 // are stable across upgrades, while their targets are versioned and ephemeral.
-func sealHookCommand() string {
+func sealHookCommand(sourceDir, sealDir string) string {
 	exe, err := resolveExecutable()
 	if err != nil {
-		return "enclaude hook-handler"
+		exe = "enclaude"
 	}
-	return shellQuote(exe) + " hook-handler"
+	return shellQuote(exe) +
+		" --source claude" +
+		" --seal-dir " + shellQuote(sealDir) +
+		" --source-dir " + shellQuote(sourceDir) +
+		" hook-handler"
 }
 
 // sealHookFull builds a complete hook command with the marker comment.
-func sealHookFull(action string) string {
-	return sealHookCommand() + " " + action + "  " + hookMarker
+func sealHookFull(sourceDir, sealDir, action string) string {
+	return sealHookCommand(sourceDir, sealDir) + " " + action + "  " + hookMarker
 }
 
 // shellQuote wraps a string in single quotes for safe use in /bin/sh commands.
@@ -45,8 +51,8 @@ func shellQuote(s string) string {
 
 // hookEntry matches Claude Code's hook config structure.
 type hookEntry struct {
-	Matcher string     `json:"matcher,omitempty"`
-	Hooks   []hookDef  `json:"hooks"`
+	Matcher string    `json:"matcher,omitempty"`
+	Hooks   []hookDef `json:"hooks"`
 }
 
 type hookDef struct {
@@ -58,7 +64,7 @@ type hookDef struct {
 
 // InstallHooks adds enclaude hooks to settings.json without
 // disturbing existing hooks.
-func InstallHooks(claudeDir string) error {
+func InstallHooks(claudeDir, sealDir string) error {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 
 	// Read existing settings
@@ -82,13 +88,13 @@ func InstallHooks(claudeDir string) error {
 	}
 
 	// Upgrade any pre-marker hooks to current format
-	migrateLegacyHooks(hooks)
+	migrateLegacyHooks(hooks, claudeDir, sealDir)
 
 	// Add SessionStart hook
 	if err := addHookEntry(hooks, "SessionStart", hookEntry{
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: sealHookFull("session-start"),
+			Command: sealHookFull(claudeDir, sealDir, "session-start"),
 			Timeout: 30,
 		}},
 	}); err != nil {
@@ -99,7 +105,7 @@ func InstallHooks(claudeDir string) error {
 	if err := addHookEntry(hooks, "SessionEnd", hookEntry{
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: sealHookFull("session-end"),
+			Command: sealHookFull(claudeDir, sealDir, "session-end"),
 			Timeout: 60,
 			Async:   true,
 		}},
@@ -316,7 +322,7 @@ func extractAction(cmd string) string {
 
 // migrateLegacyHooks upgrades pre-marker hook commands to the current
 // marker format. Returns the number of hooks migrated.
-func migrateLegacyHooks(hooks map[string]json.RawMessage) int {
+func migrateLegacyHooks(hooks map[string]json.RawMessage, sourceDir, sealDir string) int {
 	migrated := 0
 	for _, event := range []string{"SessionStart", "SessionEnd"} {
 		raw, ok := hooks[event]
@@ -342,7 +348,7 @@ func migrateLegacyHooks(hooks map[string]json.RawMessage) int {
 				if action == "" {
 					continue
 				}
-				h.Command = sealHookFull(action)
+				h.Command = sealHookFull(sourceDir, sealDir, action)
 				changed = true
 				migrated++
 			}

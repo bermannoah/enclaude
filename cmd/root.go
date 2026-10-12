@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ var (
 	flagSource    string
 	flagSourceDir string
 	flagSealDir   string
+	flagYes       bool
 )
 
 var rootCmd = &cobra.Command{
@@ -43,6 +45,7 @@ func init() {
 	// Deprecated alias kept for backwards compatibility.
 	rootCmd.PersistentFlags().StringVar(&flagSourceDir, "claude-dir", "", "alias for --source-dir")
 	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override the seal store location")
+	rootCmd.PersistentFlags().BoolVar(&flagYes, "yes", false, "allow unseal to write executable resources (settings, extensions, tools, skills, prompts)")
 }
 
 // getSource resolves the active source profile from flags, the ENCLAUDE_SOURCE
@@ -94,6 +97,24 @@ func getSourceDir() string {
 		return flagSourceDir
 	}
 	return defaultSourceDir(getSource())
+}
+
+// resolveSourceDir returns the directory that seal/unseal should operate on.
+//
+// A non-default source_dir recorded in seal.toml (which is synced and may come
+// from a compromised remote) is not trusted: the user must confirm it locally
+// with --source-dir, otherwise commands fail closed. Default installs need no
+// flag at all, and are therefore immune to source_dir tampering.
+func resolveSourceDir(cfg *config.Config) (string, error) {
+	if flagSourceDir != "" {
+		return flagSourceDir, nil
+	}
+	def := defaultSourceDir(cfg.Source())
+	if cfg.Seal.SourceDir != "" && filepath.Clean(cfg.Seal.SourceDir) != filepath.Clean(def) {
+		return "", fmt.Errorf("seal.toml records source_dir %q, which differs from the local default %q; pass --source-dir %q to confirm",
+			cfg.Seal.SourceDir, def, cfg.Seal.SourceDir)
+	}
+	return def, nil
 }
 
 func getSealDir() string {

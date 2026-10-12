@@ -34,9 +34,11 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagSourceDir != "" {
-		cfg.Seal.SourceDir = flagSourceDir
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		return err
 	}
+	cfg.Seal.SourceDir = sourceDir
 
 	git := gitops.New(sealDir)
 	identity, _, err := crypto.LoadKey(sealDir)
@@ -105,7 +107,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 
 	// Step 4: Unseal
 	fmt.Println("4/4 Unsealing restored state...")
-	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil)
+	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: true})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}

@@ -93,7 +93,7 @@ enclaude push
 # On another device — clone the encrypted repo and import your key
 git clone git@github.com:you/enclaude-data.git ~/.enclaude
 enclaude key import --from-backup   # or: enclaude key import keyfile.txt
-enclaude unseal
+enclaude unseal --yes               # --yes applies settings/extensions on a deliberate restore
 enclaude hooks install
 ```
 
@@ -137,13 +137,14 @@ means you rarely pass the flag explicitly.
 | Included | Why |
 |---|---|
 | `settings.json`, `models.json`, `models-store.json`, `keybindings.json`, `mcp.json` | User configuration |
-| `auth.json`, `oauth.json`, `mcp-auth.json` | API keys and provider credentials |
 | `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` and friends | Instructions |
 | `sessions/**/*.jsonl` | Conversation history |
 | `extensions/**`, `skills/**`, `prompts/**`, `themes/**`, `tools/**` | User resources |
 
 | Excluded | Why |
 |---|---|
+| `auth.json`, `oauth.json`, `mcp-auth.json` | Device-local credentials (see [Credentials](#credentials)) |
+| `trust.json` | Device-local project-trust decisions |
 | `bin/**`, `npm/**` | Bundled binaries and installed packages (large, regenerated) |
 | `mcp.log*`, `*.log`, `crashes.json`, `diagnostics.json` | Machine-local logs and diagnostics |
 | `extensions/enclaude.ts` | The auto-sync extension is device-local |
@@ -173,12 +174,50 @@ never deletes a freshly installed hook. Remove it with
 
 ### Credentials
 
-The `auth.json`, `oauth.json`, and `mcp-auth.json` files contain API keys and
-OAuth tokens. By default enclaude includes them, because encrypting and syncing
-credentials is the point. Note that some providers rotate OAuth refresh tokens:
-restoring a stale copy from another device can sign that device out. If you
-prefer to authenticate per device, add these paths to `[exclude]` in
-`~/.enclaude-pi/seal.toml`.
+Credentials are **not** sealed. `~/.pi/agent/auth.json`, `oauth.json`, and
+`mcp-auth.json` are excluded because they are device-local secrets, and because
+OAuth refresh tokens rotate: restoring a stale copy from another device can
+silently sign a device out. The recommended ways to pair credentials with
+enclaude are:
+
+- **Environment variables** (best for CI and servers): keep keys such as
+  `ANTHROPIC_API_KEY` in your shell/secret manager. Pi picks them up at runtime
+  and nothing secret ever lands in the store.
+- **Secret-manager references**: pi resolves `auth.json` values prefixed with
+  `!` as a command, so you can store `"!op read op://vault/pi/key"` and keep the
+  secret in 1Password, `pass`, etc. The command is config; the secret is not.
+- **Per-device login**: run `/login` on each device. Credentials stay local and
+  you re-authenticate once per machine.
+
+If you keep API keys inline in `models.json` (`apiKey`), note that `models.json`
+*is* sealed — prefer `$ENV_VAR` references so the value stays out of the store.
+If you really want to sync a credential file, remove it from the `[exclude]`
+list in `~/.enclaude-pi/seal.toml` and use a strong key backup passphrase (see
+[Security Model](#security-model)).
+
+### Executable resources and auto-unseal
+
+Settings and resources that can run code or steer the model — `settings.json`,
+`mcp.json`, `extensions/**`, `tools/**`, `skills/**`, and `prompts/**` (plus
+Claude Code's `settings.json` and `commands/**`) — are treated as *executable
+resources*. Anyone who can write to the encrypted remote and knows the public
+key published in the seal-store README can push valid ciphertext, so those files
+are the code-execution surface of a synced store.
+
+`enclaude unseal` therefore **does not write changed executable resources by
+default**. It lists them and leaves them in place. Review the changes, then
+apply them explicitly:
+
+```bash
+enclaude unseal --yes
+```
+
+The auto-sync hook (Claude Code or pi) never passes `--yes`, so a remote push
+cannot install code that runs on the next session without your confirmation. A
+skipped executable file stays in the manifest (tracked as *pending*, in the
+store's `.git` directory and never synced) so a later seal does not mistake it
+for a local deletion. `enclaude pull` and `enclaude sync` behave the same way
+and accept `--yes`.
 
 ### pi limitations
 
@@ -200,7 +239,7 @@ prefer to authenticate per device, add these paths to `[exclude]` in
 |---------|-------------|
 | `init` | Generate age keypair, store in OS keychain, initial seal, write README.md to seal store |
 | `seal` | Encrypt changed files, commit to seal store |
-| `unseal` | Decrypt seal store to `~/.claude/` |
+| `unseal` | Decrypt seal store to the source directory (add `--yes` to apply changed executable resources) |
 | `status` | Show changes since last seal |
 | `sync` | Seal + pull + push (the daily driver) |
 | `push` | Seal + git push |
@@ -225,7 +264,8 @@ Each seal store gets its own age key on `init`; the keychain entry is scoped to
 the store's directory, so sealing `~/.claude` and `~/.pi/agent` into two stores
 does not share or clobber a key. Set `ENCLAUDE_KEY` to override the keychain for
 a command (useful in CI); note that the environment variable applies to every
-store and takes precedence over the keychain.
+store and takes precedence over the keychain, and `init` uses it when set instead
+of generating a new key.
 
 > **Moving a seal store moves the key lookup.** Because the keychain entry is
 > keyed by the store's directory, relocating a store (say from `~/.enclaude` to
@@ -304,6 +344,14 @@ patterns = [
 "projects/*/memory/**" = "text_merge"
 ```
 
+The `source_dir` in `seal.toml` is a hint, not an authority. Because `seal.toml`
+is synced from the remote, enclaude ignores it for filesystem operations unless
+it matches the local default (`~/.claude`, `~/.pi/agent`, or `PI_CODING_AGENT_DIR`)
+or you pass `--source-dir`. A default install therefore never reads or writes
+outside its expected directory, even if the remote is compromised. Custom layouts
+must pass `--source-dir` on every command (put it in an alias). `seal_dir` is
+likewise pinned to the location the config was loaded from.
+
 ## Security Model
 
 | Property | Status |
@@ -314,7 +362,10 @@ patterns = [
 | Key storage | OS keychain (macOS Keychain, Linux secret-service, Windows Credential Manager), one entry per seal store |
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
 | Tamper detection | SHA-256 content hashes in manifest; `repair --check` verifies integrity |
+| Manifest path safety | Unseal validates every path and content hash; entries that are absolute, traverse (`../`), or carry a malformed hash are refused and can be dropped with `repair` |
+| Remote trust boundary | The remote is untrusted for paths; changed executable resources are not auto-applied (see [Executable resources and auto-unseal](#executable-resources-and-auto-unseal)) |
 | Key never in git | Correct — only the passphrase-encrypted backup is committed |
+| Credentials | `auth.json`, `oauth.json`, and `mcp-auth.json` are excluded from the seal by default (see [Credentials](#credentials)) |
 
 ### Honest Limitations
 
@@ -322,6 +373,7 @@ patterns = [
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
 - **Keychain entries are tied to the seal store path.** Moving a seal store does not carry its key with it; re-import the key after relocating a store. See [Key Management](#key-management).
+- **A synced store is a code-execution boundary.** It carries executable resources (settings, extensions, tools, skills, prompts). enclaude refuses to auto-apply changed executable resources, but once you run `unseal --yes` (or if you disable that protection) a compromised remote can run code with your privileges. Treat the remote as trusted, and review executable changes before applying them. See [Executable resources and auto-unseal](#executable-resources-and-auto-unseal).
 
 ## How It Works Under the Hood
 
@@ -357,11 +409,14 @@ The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent conc
 1. Install enclaude
 2. Clone your encrypted data repo
 3. Import your key (from password manager, file, or backup passphrase)
-4. Pull + unseal
+4. Pull + unseal (add --yes to restore settings/extensions on this deliberate restore)
 5. Install hooks
 ```
 
-Your full Claude Code history, memory, and settings appear on the new device, encrypted in transit and at rest.
+Your full Claude Code history, memory, and settings appear on the new device,
+encrypted in transit and at rest. Step 4 needs `--yes` because settings and other
+executable resources are not applied automatically; see [Executable resources and
+auto-unseal](#executable-resources-and-auto-unseal).
 
 ## License
 

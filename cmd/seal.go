@@ -30,9 +30,11 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	}
 
 	// Override dirs from flags
-	if flagSourceDir != "" {
-		cfg.Seal.SourceDir = flagSourceDir
+	sourceDir, err := resolveSourceDir(cfg)
+	if err != nil {
+		return err
 	}
+	cfg.Seal.SourceDir = sourceDir
 
 	if flagDryRun {
 		fmt.Println("(dry run — showing what would be sealed)")

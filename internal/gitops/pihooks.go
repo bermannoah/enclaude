@@ -80,12 +80,22 @@ func InstallPiHooks(agentDir, sealDir string) error {
 	if err := os.MkdirAll(extDir, 0755); err != nil {
 		return fmt.Errorf("creating extensions directory: %w", err)
 	}
-	args, err := json.Marshal([]string{"--source", "pi", "--seal-dir", sealDir})
+	path := PiExtensionPath(agentDir)
+
+	// Never clobber an extension we did not write.
+	if existing, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(existing), PiHookMarker) {
+			return fmt.Errorf("refusing to overwrite %s: not an enclaude-managed extension", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading existing extension: %w", err)
+	}
+
+	args, err := json.Marshal([]string{"--source", "pi", "--seal-dir", sealDir, "--source-dir", agentDir})
 	if err != nil {
 		return fmt.Errorf("encoding extension args: %w", err)
 	}
 	src := strings.Replace(piExtensionTemplate, "{{ARGS}}", string(args), 1)
-	path := PiExtensionPath(agentDir)
 	if err := os.WriteFile(path, []byte(src), 0644); err != nil {
 		return fmt.Errorf("writing pi extension: %w", err)
 	}
