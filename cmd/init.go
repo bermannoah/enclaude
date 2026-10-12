@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
@@ -26,12 +27,13 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	claudeDir := getClaudeDir()
+	source := getSource()
+	sourceDir := getSourceDir()
 	sealDir := getSealDir()
 
-	// Check claude directory exists
-	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
-		return fmt.Errorf("claude directory not found at %s", claudeDir)
+	// Check source directory exists
+	if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+		return fmt.Errorf("%s directory not found at %s", source, sourceDir)
 	}
 
 	// Check seal directory doesn't already exist
@@ -40,23 +42,33 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Initializing enclaude...")
-	fmt.Printf("  Claude dir: %s\n", claudeDir)
-	fmt.Printf("  Seal dir:  %s\n", sealDir)
+	fmt.Printf("  Source:    %s\n", source)
+	fmt.Printf("  Source dir: %s\n", sourceDir)
+	fmt.Printf("  Seal dir:   %s\n", sealDir)
 
-	// 1. Generate age keypair
-	fmt.Println("\nGenerating age keypair...")
-	identity, err := crypto.GenerateKey()
-	if err != nil {
-		return fmt.Errorf("generating key: %w", err)
-	}
-	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	// 1. Reuse an existing key when present so multiple seal stores on the
+	// same device share one keychain entry, otherwise generate a new one.
+	var identity *age.X25519Identity
+	if existing, _, err := crypto.LoadKey(); err == nil {
+		identity = existing
+		fmt.Println("\nReusing existing age key.")
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	} else {
+		fmt.Println("\nGenerating age keypair...")
+		generated, err := crypto.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("generating key: %w", err)
+		}
+		identity = generated
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
 
-	// 2. Store in OS keychain
-	fmt.Println("Storing private key in OS keychain...")
-	if err := crypto.StoreKey(identity); err != nil {
-		return fmt.Errorf("storing key in keychain: %w", err)
+		// 2. Store in OS keychain
+		fmt.Println("Storing private key in OS keychain...")
+		if err := crypto.StoreKey(identity); err != nil {
+			return fmt.Errorf("storing key in keychain: %w", err)
+		}
+		fmt.Println("  Stored in keychain.")
 	}
-	fmt.Println("  Stored in keychain.")
 
 	// 3. Create seal directory
 	if err := os.MkdirAll(sealDir, 0700); err != nil {
@@ -84,7 +96,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Write default config
-	cfg := config.DefaultConfig(claudeDir, sealDir)
+	cfg := config.DefaultConfigForSource(source, sourceDir, sealDir)
 	if err := cfg.Save(sealDir); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -112,7 +124,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write README
-	readme := buildReadme(identity.Recipient().String(), cfg.Seal.DeviceID)
+	readme := buildReadmeForSource(identity.Recipient().String(), cfg.Seal.DeviceID, source)
 	if err := os.WriteFile(filepath.Join(sealDir, "README.md"), []byte(readme), 0644); err != nil {
 		return fmt.Errorf("writing README: %w", err)
 	}
@@ -148,7 +160,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 const readmeTemplate = `# enclaude seal store
 
-This repository contains an encrypted backup of a Claude Code configuration
+This repository contains an encrypted backup of a {SOURCE_NAME} configuration
 directory, managed by [enclaude](https://github.com/coredipper/enclaude).
 
 All files are encrypted with [age](https://age-encryption.org/) and cannot be
@@ -162,18 +174,23 @@ read without the private key stored in the OS keychain on the originating device
 
 | Field      | Value                    |
 |------------|--------------------------|
+| Source     | {SOURCE}                 |
 | Public key | {PUBLIC_KEY} |
 | Device ID  | {DEVICE_ID} |
 
 ## Restoring on a new machine
 
 1. Install enclaude.
-2. Clone this repository to {TICK}~/.enclaude/{TICK}:
-   {TICK}git clone <remote-url> ~/.enclaude{TICK}
+2. Clone this repository to {TICK}{SEAL_DIR}{TICK}:
+   {TICK}git clone <remote-url> {SEAL_DIR}{TICK}
 3. Import your private key into the keychain:
    {TICK}enclaude key import{TICK}
-4. Decrypt and restore your Claude files:
+4. Decrypt and restore your {SOURCE_NAME} files:
    {TICK}enclaude unseal{TICK}
+5. Reinstall auto-sync hooks on this device:
+   {TICK}enclaude hooks install{TICK}
+
+{PI_NOTE}
 
 ## Key recovery
 
@@ -196,9 +213,27 @@ enclaude status        # show unsealed changes not yet sealed
 `
 
 func buildReadme(publicKey, deviceID string) string {
+	return buildReadmeForSource(publicKey, deviceID, config.SourceClaude)
+}
+
+func buildReadmeForSource(publicKey, deviceID, source string) string {
+	source = config.NormalizeSource(source)
+	sourceName := "Claude Code"
+	sealDir := "~/.enclaude"
+	piNote := ""
+	if source == config.SourcePi {
+		sourceName = "pi.dev"
+		sealDir = "~/.enclaude-pi"
+		piNote = "For pi.dev, " + "`~/.enclaude-pi`" + " is the default seal store. Use\n" +
+			"`--source pi` (or `ENCLAUDE_SOURCE=pi`) with every command."
+	}
 	return strings.NewReplacer(
 		"{PUBLIC_KEY}", publicKey,
 		"{DEVICE_ID}", deviceID,
+		"{SOURCE}", source,
+		"{SOURCE_NAME}", sourceName,
+		"{SEAL_DIR}", sealDir,
+		"{PI_NOTE}", piNote,
 		"{TICK}", "`",
 		"{FENCE}", "```",
 	).Replace(readmeTemplate)

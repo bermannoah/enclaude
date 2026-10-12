@@ -34,8 +34,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
+	if flagSourceDir != "" {
+		cfg.Seal.SourceDir = flagSourceDir
 	}
 
 	git := gitops.New(sealDir)

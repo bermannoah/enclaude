@@ -42,7 +42,7 @@ func runReadmeRegen(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using key from %s\n", source)
 	}
 
-	readme := buildReadme(recipient.String(), cfg.Seal.DeviceID)
+	readme := buildReadmeForSource(recipient.String(), cfg.Seal.DeviceID, cfg.Source())
 	readmePath := filepath.Join(sealDir, "README.md")
 	if err := os.WriteFile(readmePath, []byte(readme), 0644); err != nil {
 		return fmt.Errorf("writing README: %w", err)

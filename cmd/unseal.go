@@ -11,8 +11,8 @@ import (
 
 var unsealCmd = &cobra.Command{
 	Use:   "unseal",
-	Short: "Decrypt seal contents to ~/.claude/",
-	Long:  "Decrypt all sealed objects and restore them to the Claude directory.",
+	Short: "Decrypt seal contents to the source directory",
+	Long:  "Decrypt all sealed objects and restore them to the configured source directory.",
 	RunE:  runUnseal,
 }
 
@@ -28,8 +28,8 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
+	if flagSourceDir != "" {
+		cfg.Seal.SourceDir = flagSourceDir
 	}
 
 	if flagDryRun {

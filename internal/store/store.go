@@ -77,9 +77,11 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		manifest = NewManifest(cfg.Seal.DeviceID)
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
+	// A brand-new manifest must be persisted even if the source is empty.
+	newManifest := len(manifest.Files) == 0
 
 	// Scan files
-	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return stats, fmt.Errorf("scanning files: %w", err)
 	}
@@ -172,9 +174,13 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 	}
 
-	// Save manifest
-	if err := manifest.Save(sealDir); err != nil {
-		return stats, fmt.Errorf("saving manifest: %w", err)
+	// Save the manifest only when something actually changed. Saving on a no-op
+	// seal would bump SealedAt and leave the seal store dirty, which then makes
+	// a subsequent `git pull` refuse to merge over the modified manifest.json.
+	if stats.HasChanges() || newManifest {
+		if err := manifest.Save(sealDir); err != nil {
+			return stats, fmt.Errorf("saving manifest: %w", err)
+		}
 	}
 
 	return stats, nil
@@ -204,7 +210,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if progress != nil {
 			progress(i, stats.Total, relPath)
 		}
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
+		absPath := filepath.Join(cfg.Seal.SourceDir, relPath)
 
 		// Check if file already exists and matches
 		if existing, err := os.ReadFile(absPath); err == nil {
@@ -258,7 +264,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	if stats.Errors > 0 {
 		return stats, nil
 	}
-	existingFiles, scanErr := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	existingFiles, scanErr := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if scanErr != nil {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
@@ -279,7 +285,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 						fmt.Printf("  [delete] %s\n", f.RelPath)
 					}
 					dir := filepath.Dir(f.AbsPath)
-					if dir != cfg.Seal.ClaudeDir {
+					if dir != cfg.Seal.SourceDir {
 						os.Remove(dir)
 					}
 				} else {
@@ -303,7 +309,7 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 
-	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return nil, fmt.Errorf("scanning files: %w", err)
 	}
@@ -340,8 +346,8 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
 	// restore), treat as empty — all manifest files would be restored.
 	var files []ScanResult
-	if _, statErr := os.Stat(cfg.Seal.ClaudeDir); statErr == nil {
-		files, err = ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	if _, statErr := os.Stat(cfg.Seal.SourceDir); statErr == nil {
+		files, err = ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 		if err != nil {
 			return nil, fmt.Errorf("scanning files: %w", err)
 		}
@@ -453,10 +459,14 @@ func patternSpecificity(pattern string) string {
 }
 
 // isSessionComplete determines if a session JSONL file is likely complete.
-// Session files under projects/ with UUID-like names are complete if they exist
-// (active sessions are still being written to, but we check PIDs elsewhere).
+// Claude Code sessions live under projects/ and pi sessions live under
+// sessions/. Both are treated as complete once they exist; active sessions
+// keep appending, which only produces newer hashes on the next seal.
 func isSessionComplete(relPath string) bool {
-	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
+	if !strings.HasSuffix(relPath, ".jsonl") {
+		return false
+	}
+	return strings.HasPrefix(relPath, "projects/") || strings.HasPrefix(relPath, "sessions/")
 }
 
 // RepairResult describes the outcome of a seal store integrity check.
@@ -561,7 +571,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, path)
+		absPath := filepath.Join(cfg.Seal.SourceDir, path)
 		plaintext, err := os.ReadFile(absPath)
 		if err != nil {
 			continue // plaintext not available

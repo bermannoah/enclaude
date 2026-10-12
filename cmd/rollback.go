@@ -16,7 +16,7 @@ var rollbackForce bool
 var rollbackCmd = &cobra.Command{
 	Use:   "rollback <ref>",
 	Short: "Restore seal to a previous state",
-	Long:  "Restores ~/.claude/ to the state captured at a specific seal commit. Creates a safety commit first.",
+	Long:  "Restores the source directory to the state captured at a specific seal commit. Creates a safety commit first.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runRollback,
 }
@@ -34,8 +34,8 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
+	if flagSourceDir != "" {
+		cfg.Seal.SourceDir = flagSourceDir
 	}
 
 	git := gitops.New(sealDir)
@@ -50,7 +50,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	}
 
 	if !rollbackForce {
-		fmt.Printf("This will restore ~/.claude/ to the state at %s.\n", ui.Cyan(ref))
+		fmt.Printf("This will restore the source directory to the state at %s.\n", ui.Cyan(ref))
 		fmt.Println("A safety commit of the current state will be created first.")
 		fmt.Printf("Use %s to skip this confirmation.\n\n", ui.Faint("--force"))
 		fmt.Print("Continue? [y/N] ")

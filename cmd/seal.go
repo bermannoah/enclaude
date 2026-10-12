@@ -13,7 +13,7 @@ import (
 var sealCmd = &cobra.Command{
 	Use:   "seal",
 	Short: "Encrypt changed files into the seal store",
-	Long:  "Scan ~/.claude/ for changes, encrypt new/modified files, and commit to seal store.",
+	Long:  "Scan the source directory for changes, encrypt new/modified files, and commit to seal store.",
 	RunE:  runSeal,
 }
 
@@ -30,8 +30,8 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	}
 
 	// Override dirs from flags
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
+	if flagSourceDir != "" {
+		cfg.Seal.SourceDir = flagSourceDir
 	}
 
 	if flagDryRun {

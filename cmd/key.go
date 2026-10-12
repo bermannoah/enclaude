@@ -115,11 +115,13 @@ var keyRotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Generate a new key and re-encrypt all sealed objects",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sealDir := getSealDir()
+		activeSealDir := getSealDir()
 
-		cfg, err := config.Load(sealDir)
-		if err != nil {
-			return err
+		// Every seal store on the device shares one keychain entry, so we must
+		// re-encrypt all of them before replacing that entry.
+		sealDirs := append([]string{activeSealDir}, otherExistingSealDirs(activeSealDir)...)
+		if len(sealDirs) > 1 {
+			fmt.Printf("Found %d seal stores sharing this key; all will be re-encrypted.\n", len(sealDirs))
 		}
 
 		oldIdentity, _, err := crypto.LoadKey()
@@ -136,18 +138,25 @@ var keyRotateCmd = &cobra.Command{
 		newPub := newIdentity.Recipient().String()
 
 		fmt.Println("Re-encrypting all objects...")
-		rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
-		if err != nil {
-			return fmt.Errorf("rotation: %w", err)
+		for _, sealDir := range sealDirs {
+			cfg, err := config.Load(sealDir)
+			if err != nil {
+				return err
+			}
+			rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
+			if err != nil {
+				return fmt.Errorf("rotation of %s: %w", sealDir, err)
+			}
+			fmt.Printf("  %s: re-encrypted %d objects.\n", sealDir, rotated)
 		}
-		fmt.Printf("  Re-encrypted %d objects.\n", rotated)
 
-		// Store new key in keychain (replaces old)
+		// Store new key in keychain (replaces old) only after every store has
+		// been re-encrypted.
 		if err := crypto.StoreKey(newIdentity); err != nil {
 			return fmt.Errorf("storing new key: %w", err)
 		}
 
-		// Create new backup
+		// Create new backups in every store with a single passphrase.
 		fmt.Print("\nNew backup passphrase (or Enter to skip): ")
 		reader := bufio.NewReader(os.Stdin)
 		passphrase, _ := reader.ReadString('\n')
@@ -157,17 +166,27 @@ var keyRotateCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("creating backup: %w", err)
 			}
-			os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600)
-			fmt.Println("  Key backup updated.")
+			for _, sealDir := range sealDirs {
+				if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
+					return fmt.Errorf("writing backup to %s: %w", sealDir, err)
+				}
+			}
+			fmt.Println("  Key backups updated.")
 		}
 
-		// Commit
-		git := gitops.New(sealDir)
-		if err := git.AddAll(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-		if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID)); err != nil {
-			return fmt.Errorf("git commit: %w", err)
+		// Commit each store.
+		for _, sealDir := range sealDirs {
+			cfg, err := config.Load(sealDir)
+			if err != nil {
+				return err
+			}
+			git := gitops.New(sealDir)
+			if err := git.AddAll(); err != nil {
+				return fmt.Errorf("git add: %w", err)
+			}
+			if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID)); err != nil {
+				return fmt.Errorf("git commit: %w", err)
+			}
 		}
 
 		fmt.Printf("\n%s Key rotated.\n", ui.Green("Done."))

@@ -1,6 +1,11 @@
 # enclaude
 
-Encrypted, git-backed, cross-device sync for `~/.claude/`.
+Encrypted, git-backed, cross-device sync for `~/.claude/` and `~/.pi/agent/`.
+
+enclaude treats each supported agent as a **source profile**: it seals the
+source directory into an age-encrypted git repository and restores it on any
+device. Claude Code and [pi.dev](https://pi.dev) are supported out of the box;
+see [pi.dev support](#pidev-support).
 
 ## The Problem
 
@@ -98,7 +103,95 @@ enclaude hooks install
 enclaude hooks install
 ```
 
-This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
+This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites. For pi.dev, install a managed extension instead with `enclaude hooks install --source pi`; see [pi.dev support](#pidev-support).
+
+## pi.dev Support
+
+pi.dev stores its state in `~/.pi/agent/` (configurable with
+`PI_CODING_AGENT_DIR`). enclaude ships a `pi` source profile that understands
+that layout and defaults to a separate seal store so you can seal both agents
+side by side.
+
+| | Claude Code | pi.dev |
+|---|---|---|
+| Source flag | `--source claude` (default) | `--source pi` |
+| Source directory | `~/.claude` | `~/.pi/agent` (or `$PI_CODING_AGENT_DIR`) |
+| Default seal store | `~/.enclaude` | `~/.enclaude-pi` |
+| Hooks | `SessionStart`/`SessionEnd` in `settings.json` | managed extension at `extensions/enclaude.ts` |
+
+```bash
+# Initialize a pi seal store
+export ENCLAUDE_SOURCE=pi          # or pass --source pi to every command
+enclaude init --source pi
+
+enclaude status --source pi
+enclaude seal   --source pi
+enclaude unseal --source pi
+```
+
+Setting `ENCLAUDE_SOURCE=pi` (or aliasing `enclaude` to `enclaude --source pi`)
+means you rarely pass the flag explicitly.
+
+### What gets sealed
+
+| Included | Why |
+|---|---|
+| `settings.json`, `models.json`, `models-store.json`, `keybindings.json`, `mcp.json` | User configuration |
+| `auth.json`, `oauth.json`, `mcp-auth.json` | API keys and provider credentials |
+| `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` and friends | Instructions |
+| `sessions/**/*.jsonl` | Conversation history |
+| `extensions/**`, `skills/**`, `prompts/**`, `themes/**`, `tools/**` | User resources |
+
+| Excluded | Why |
+|---|---|
+| `bin/**`, `npm/**` | Bundled binaries and installed packages (large, regenerated) |
+| `mcp.log*`, `*.log`, `crashes.json`, `diagnostics.json` | Machine-local logs and diagnostics |
+| `extensions/enclaude.ts` | The auto-sync extension is device-local |
+| `*.swp`, `*.tmp`, `.DS_Store` | Editor and OS noise |
+
+### Merge behaviour
+
+Pi sessions are unique per session and append-only while active, so
+`sessions/**/*.jsonl` uses the `immutable` union strategy. Session files are
+never rewritten by a merge. Small JSON configuration uses `last_write_wins`,
+and Markdown/TypeScript resources merge as text.
+
+### Auto-sync with the pi extension
+
+```bash
+enclaude hooks install --source pi
+```
+
+This writes `~/.pi/agent/extensions/enclaude.ts`, a small managed extension
+that runs `enclaude hook-handler session-start` (pull + unseal) when a pi
+session starts and `enclaude hook-handler session-end` (seal + push) when it
+shuts down. The extension resolves the `enclaude` binary at runtime
+(`$ENCLAUDE_BIN`, `~/.local/bin`, `~/go/bin`, Homebrew paths, then `PATH`), so
+the same file works across machines. It is excluded from the seal so an unseal
+never deletes a freshly installed hook. Remove it with
+`enclaude hooks remove --source pi`.
+
+### Credentials
+
+The `auth.json`, `oauth.json`, and `mcp-auth.json` files contain API keys and
+OAuth tokens. By default enclaude includes them, because encrypting and syncing
+credentials is the point. Note that some providers rotate OAuth refresh tokens:
+restoring a stale copy from another device can sign that device out. If you
+prefer to authenticate per device, add these paths to `[exclude]` in
+`~/.enclaude-pi/seal.toml`.
+
+### pi limitations
+
+- **Custom session directories are not followed.** If you set `sessionDir`,
+  `PI_CODING_AGENT_SESSION_DIR`, or `--session-dir`, sessions live outside the
+  source directory and are not sealed. Keep sessions inside `~/.pi/agent` or
+  symlink them in.
+- **Project `.pi/` configuration is not sealed.** Project-level settings live
+  in each repository and should be versioned with that repository, not in your
+  personal encrypted store.
+- **Sessions migrated in place.** Pi rewrites old session files when it loads
+  and migrates them, so two devices may hold different bytes for the same
+  session. The `immutable` strategy keeps the local copy in that edge case.
 
 ## Commands
 
@@ -134,7 +227,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `repair` | Verify integrity and fix missing objects by re-sealing from plaintext |
 | `repair --check` | Verify-only mode (exit code 1 if issues found, useful for CI) |
 | `repair --delete-orphans` | Also remove unreferenced object files |
-| `hooks install` | Add auto-sync hooks to Claude Code settings |
+| `hooks install` | Add auto-sync hooks (Claude Code) or the managed pi extension |
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
 | `readme-regen` | Regenerate and commit README.md in the seal store |
@@ -159,7 +252,10 @@ These strategies are configurable per path pattern in `seal.toml`.
 
 ```toml
 [seal]
-claude_dir = "~/.claude"
+# "claude" or "pi". Selects the default include/exclude/merge profile.
+source = "claude"
+# Directory being sealed. Formerly claude_dir (still accepted on load).
+source_dir = "~/.claude"
 seal_dir = "~/.enclaude"
 device_id = "macbook-ab12cd34"
 

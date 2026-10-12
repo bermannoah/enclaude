@@ -12,7 +12,7 @@ import (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show what changed since last seal",
-	Long:  "Compare ~/.claude/ against the seal manifest to show pending changes.",
+	Long:  "Compare the source directory against the seal manifest to show pending changes.",
 	RunE:  runStatus,
 }
 
@@ -28,8 +28,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
+	if flagSourceDir != "" {
+		cfg.Seal.SourceDir = flagSourceDir
 	}
 
 	diff, err := store.Status(cfg)

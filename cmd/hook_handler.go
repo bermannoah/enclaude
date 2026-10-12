@@ -17,7 +17,7 @@ const lockTimeout = 5 * time.Second
 
 var hookHandlerCmd = &cobra.Command{
 	Use:    "hook-handler <event>",
-	Short:  "Handle Claude Code lifecycle hooks (internal)",
+	Short:  "Handle agent lifecycle hooks (internal)",
 	Hidden: true,
 	Args:   cobra.ExactArgs(1),
 	RunE:   runHookHandler,

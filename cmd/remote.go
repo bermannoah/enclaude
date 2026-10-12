@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
+	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
@@ -10,6 +13,26 @@ import (
 var remoteCmd = &cobra.Command{
 	Use:   "remote",
 	Short: "Manage git remotes for sync",
+}
+
+// mergeDriverCommand builds the git merge-driver command line. It pins the
+// executable, source profile, and seal dir so the driver works from git's
+// environment, where no --source flag is present.
+func mergeDriverCommand(sealDir string) string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		exe = "enclaude"
+	}
+	source := getSource()
+	if cfg, err := config.Load(sealDir); err == nil {
+		source = cfg.Source()
+	}
+	return fmt.Sprintf("%s --source %s --seal-dir %s merge-driver manifest %%O %%A %%B",
+		shellQuote(exe), shellQuote(source), shellQuote(sealDir))
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 var remoteAddCmd = &cobra.Command{
@@ -25,8 +48,10 @@ var remoteAddCmd = &cobra.Command{
 			return fmt.Errorf("adding remote: %w", err)
 		}
 
-		// Register merge driver
-		driverCmd := "enclaude merge-driver manifest %O %A %B"
+		// Register merge driver. Embed the absolute binary path plus the source
+		// and seal dir so git invokes the right store even without the shell
+		// environment that ran this command (required for pi's separate store).
+		driverCmd := mergeDriverCommand(sealDir)
 		if err := git.ConfigMergeDriver("enclaude-manifest", driverCmd); err != nil {
 			fmt.Printf("Warning: could not register merge driver: %v\n", err)
 		}

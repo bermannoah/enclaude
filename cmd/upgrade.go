@@ -39,10 +39,19 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// v2 -> v3: the source profile and source_dir field were introduced.
+	// config.Load has already migrated the in-memory values; this branch only
+	// needs to persist them.
+	if cfg.Version < 3 {
+		fmt.Printf("  Migrated to %s profile (source_dir = %s).\n", cfg.Source(), cfg.Seal.SourceDir)
+		changed = true
+	}
+
 	// Validate: check if sessions-index.json still effectively resolves to
 	// jsonl_dedup after migration. Uses the same precedence logic as the
 	// merge driver. Best-effort probe set — the merge driver catches any
-	// edge cases that slip through at runtime.
+	// edge cases that slip through at runtime. This only applies to the
+	// Claude Code profile.
 	probes := []string{
 		"projects/a/sessions-index.json",
 		"projects/A/sessions-index.json",
@@ -57,13 +66,15 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"projects/ABCD/sessions-index.json",
 		"projects/test/sessions-index.json",
 	}
-	for _, testPath := range probes {
-		resolvedStrategy, winningPattern := store.ResolveMergeStrategyWithPattern(testPath, cfg.Merge)
-		if resolvedStrategy == "jsonl_dedup" {
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"\n%s %s resolves to jsonl_dedup (via rule %q).\n"+
-					"  Update it to 'sessions_index' in seal.toml.\n", ui.Red("Warning:"), testPath, winningPattern)
-			return fmt.Errorf("manual fix required: update rule %q to 'sessions_index' in seal.toml", winningPattern)
+	if cfg.Source() == config.SourceClaude {
+		for _, testPath := range probes {
+			resolvedStrategy, winningPattern := store.ResolveMergeStrategyWithPattern(testPath, cfg.Merge)
+			if resolvedStrategy == "jsonl_dedup" {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"\n%s %s resolves to jsonl_dedup (via rule %q).\n"+
+						"  Update it to 'sessions_index' in seal.toml.\n", ui.Red("Warning:"), testPath, winningPattern)
+				return fmt.Errorf("manual fix required: update rule %q to 'sessions_index' in seal.toml", winningPattern)
+			}
 		}
 	}
 

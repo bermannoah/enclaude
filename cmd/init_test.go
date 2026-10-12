@@ -77,3 +77,32 @@ func TestBuildReadme(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildReadmeForSourcePi(t *testing.T) {
+	got := buildReadmeForSource("age1abc", "host-1234", "pi")
+
+	for _, want := range []string{
+		"pi.dev",
+		"~/.enclaude-pi",
+		"--source pi",
+		"age1abc",
+		"host-1234",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected pi README to contain %q", want)
+		}
+	}
+	for _, absent := range []string{"{SOURCE}", "{SOURCE_NAME}", "{PUBLIC_KEY}", "{DEVICE_ID}"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("unresolved placeholder %q in README", absent)
+		}
+	}
+
+	claude := buildReadmeForSource("age1abc", "host-1234", "claude")
+	if !strings.Contains(claude, "Claude Code") {
+		t.Error("expected claude README to name Claude Code")
+	}
+	if strings.Contains(claude, "pi.dev") {
+		t.Error("claude README should not mention pi.dev")
+	}
+}
