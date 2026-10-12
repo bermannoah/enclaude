@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,6 +35,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const ENCLAUDE_ARGS: string[] = {{ARGS}};
+
 function enclaudeCommand(): string {
 	const candidates = [
 		process.env.ENCLAUDE_BIN,
@@ -52,7 +55,7 @@ function enclaudeCommand(): string {
 
 async function runEnclaude(pi: ExtensionAPI, action: string, timeout: number): Promise<void> {
 	try {
-		await pi.exec(enclaudeCommand(), ["hook-handler", action], { timeout });
+		await pi.exec(enclaudeCommand(), [...ENCLAUDE_ARGS, "hook-handler", action], { timeout });
 	} catch {
 		// Never let a sync failure block pi.
 	}
@@ -69,14 +72,21 @@ export default function (pi: ExtensionAPI) {
 `
 
 // InstallPiHooks writes the enclaude pi extension into agentDir, preserving
-// any other extensions.
-func InstallPiHooks(agentDir string) error {
+// any other extensions. The generated extension pins the source profile and
+// seal dir so the hook handler operates on the right store regardless of the
+// environment pi was launched from.
+func InstallPiHooks(agentDir, sealDir string) error {
 	extDir := filepath.Join(agentDir, "extensions")
 	if err := os.MkdirAll(extDir, 0755); err != nil {
 		return fmt.Errorf("creating extensions directory: %w", err)
 	}
+	args, err := json.Marshal([]string{"--source", "pi", "--seal-dir", sealDir})
+	if err != nil {
+		return fmt.Errorf("encoding extension args: %w", err)
+	}
+	src := strings.Replace(piExtensionTemplate, "{{ARGS}}", string(args), 1)
 	path := PiExtensionPath(agentDir)
-	if err := os.WriteFile(path, []byte(piExtensionTemplate), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0644); err != nil {
 		return fmt.Errorf("writing pi extension: %w", err)
 	}
 	return nil

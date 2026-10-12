@@ -13,7 +13,7 @@ func TestInstallPiHooksCreatesExtension(t *testing.T) {
 	if PiHooksInstalled(dir) {
 		t.Fatal("PiHooksInstalled() = true before install")
 	}
-	if err := InstallPiHooks(dir); err != nil {
+	if err := InstallPiHooks(dir, "/tmp/seal"); err != nil {
 		t.Fatalf("InstallPiHooks() error: %v", err)
 	}
 	if !PiHooksInstalled(dir) {
@@ -32,6 +32,9 @@ func TestInstallPiHooksCreatesExtension(t *testing.T) {
 		`"hook-handler"`,
 		`"session-start"`,
 		`"session-end"`,
+		`"--source"`,
+		`"--seal-dir"`,
+		`"/tmp/seal"`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("extension missing %q", want)
@@ -57,7 +60,7 @@ func TestInstallPiHooksPreservesOtherExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := InstallPiHooks(dir); err != nil {
+	if err := InstallPiHooks(dir, "/tmp/seal"); err != nil {
 		t.Fatalf("InstallPiHooks() error: %v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
@@ -67,7 +70,7 @@ func TestInstallPiHooksPreservesOtherExtensions(t *testing.T) {
 
 func TestRemovePiHooks(t *testing.T) {
 	dir := t.TempDir()
-	if err := InstallPiHooks(dir); err != nil {
+	if err := InstallPiHooks(dir, "/tmp/seal"); err != nil {
 		t.Fatal(err)
 	}
 	if err := RemovePiHooks(dir); err != nil {

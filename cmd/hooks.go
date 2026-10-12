@@ -32,7 +32,7 @@ Existing settings and extensions are preserved.`,
 				return nil
 			}
 			fmt.Println("Installing seal extension for pi.dev...")
-			if err := gitops.InstallPiHooks(dir); err != nil {
+			if err := gitops.InstallPiHooks(dir, getSealDir()); err != nil {
 				return fmt.Errorf("installing pi hooks: %w", err)
 			}
 			fmt.Printf("  Wrote %s\n", gitops.PiExtensionPath(dir))
