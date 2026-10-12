@@ -114,11 +114,13 @@ func defaultSealDirCandidates() []string {
 	return []string{home + "/.enclaude", home + "/.enclaude-pi"}
 }
 
-// otherExistingSealDirs returns conventional seal stores (other than active)
-// that are actually initialized.
-func otherExistingSealDirs(active string) []string {
+// otherExistingSealDirs returns seal stores in candidates (other than active)
+// that are actually initialized. Candidates are passed in so the caller
+// controls which locations are considered, which keeps tests off the real home
+// directory.
+func otherExistingSealDirs(active string, candidates []string) []string {
 	var out []string
-	for _, dir := range defaultSealDirCandidates() {
+	for _, dir := range candidates {
 		if dir == active {
 			continue
 		}

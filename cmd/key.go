@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
-	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -119,7 +120,7 @@ var keyRotateCmd = &cobra.Command{
 
 		// Every seal store on the device shares one keychain entry, so we must
 		// re-encrypt all of them before replacing that entry.
-		sealDirs := append([]string{activeSealDir}, otherExistingSealDirs(activeSealDir)...)
+		sealDirs := append([]string{activeSealDir}, otherExistingSealDirs(activeSealDir, defaultSealDirCandidates())...)
 		if len(sealDirs) > 1 {
 			fmt.Printf("Found %d seal stores sharing this key; all will be re-encrypted.\n", len(sealDirs))
 		}
@@ -137,56 +138,14 @@ var keyRotateCmd = &cobra.Command{
 		}
 		newPub := newIdentity.Recipient().String()
 
-		fmt.Println("Re-encrypting all objects...")
-		for _, sealDir := range sealDirs {
-			cfg, err := config.Load(sealDir)
-			if err != nil {
-				return err
-			}
-			rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
-			if err != nil {
-				return fmt.Errorf("rotation of %s: %w", sealDir, err)
-			}
-			fmt.Printf("  %s: re-encrypted %d objects.\n", sealDir, rotated)
-		}
-
-		// Store new key in keychain (replaces old) only after every store has
-		// been re-encrypted.
-		if err := crypto.StoreKey(newIdentity); err != nil {
-			return fmt.Errorf("storing new key: %w", err)
-		}
-
-		// Create new backups in every store with a single passphrase.
 		fmt.Print("\nNew backup passphrase (or Enter to skip): ")
 		reader := bufio.NewReader(os.Stdin)
 		passphrase, _ := reader.ReadString('\n')
 		passphrase = strings.TrimSpace(passphrase)
-		if passphrase != "" {
-			backup, err := crypto.EncryptWithPassphrase([]byte(newIdentity.String()), passphrase)
-			if err != nil {
-				return fmt.Errorf("creating backup: %w", err)
-			}
-			for _, sealDir := range sealDirs {
-				if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
-					return fmt.Errorf("writing backup to %s: %w", sealDir, err)
-				}
-			}
-			fmt.Println("  Key backups updated.")
-		}
 
-		// Commit each store.
-		for _, sealDir := range sealDirs {
-			cfg, err := config.Load(sealDir)
-			if err != nil {
-				return err
-			}
-			git := gitops.New(sealDir)
-			if err := git.AddAll(); err != nil {
-				return fmt.Errorf("git add: %w", err)
-			}
-			if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID)); err != nil {
-				return fmt.Errorf("git commit: %w", err)
-			}
+		fmt.Println("Re-encrypting all objects...")
+		if err := rotateKeyAcrossStores(sealDirs, oldIdentity, newIdentity, passphrase, flagVerbose); err != nil {
+			return err
 		}
 
 		fmt.Printf("\n%s Key rotated.\n", ui.Green("Done."))
@@ -194,6 +153,78 @@ var keyRotateCmd = &cobra.Command{
 		fmt.Printf("  New public key: %s\n", ui.Bold(newPub))
 		return nil
 	},
+}
+
+// rotateKeyAcrossStores re-encrypts every seal store with newIdentity, then
+// replaces the shared keychain entry, optionally writes a new passphrase backup
+// into each store, and commits each store.
+//
+// A pre-flight pass verifies that every store is fully readable with the old key
+// before anything is modified, and the keychain entry is replaced only after
+// every store has been successfully re-encrypted. This prevents a store that
+// uses a different key (or has corrupt/missing objects) from stranding the
+// others. Rotation is still not transactional against mid-write failures such
+// as a full disk; use the passphrase backup to recover in that case.
+func rotateKeyAcrossStores(sealDirs []string, oldIdentity, newIdentity *age.X25519Identity, backupPassphrase string, verbose bool) error {
+	cfgs := make([]*config.Config, len(sealDirs))
+	for i, sealDir := range sealDirs {
+		cfg, err := config.Load(sealDir)
+		if err != nil {
+			return fmt.Errorf("loading config for %s: %w", sealDir, err)
+		}
+		cfgs[i] = cfg
+	}
+
+	// Pre-flight: every store must be fully readable with the current key before
+	// we modify anything.
+	for i, sealDir := range sealDirs {
+		result, err := store.Verify(cfgs[i], oldIdentity, false)
+		if err != nil {
+			return fmt.Errorf("verifying %s: %w", sealDir, err)
+		}
+		if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 {
+			return fmt.Errorf("refusing to rotate: store %s is not fully readable with the current key (%d missing, %d corrupt objects)",
+				sealDir, len(result.MissingObjects), len(result.CorruptObjects))
+		}
+	}
+
+	for i, sealDir := range sealDirs {
+		rotated, err := store.Rotate(cfgs[i], oldIdentity, newIdentity.Recipient(), verbose, nil)
+		if err != nil {
+			return fmt.Errorf("rotation of %s: %w", sealDir, err)
+		}
+		fmt.Printf("  %s: re-encrypted %d objects.\n", sealDir, rotated)
+	}
+
+	// Replace the shared keychain entry only after every store was re-encrypted.
+	if err := crypto.StoreKey(newIdentity); err != nil {
+		return fmt.Errorf("storing new key: %w", err)
+	}
+
+	// Write the new passphrase backup into every store with a single passphrase.
+	if backupPassphrase != "" {
+		backup, err := crypto.EncryptWithPassphrase([]byte(newIdentity.String()), backupPassphrase)
+		if err != nil {
+			return fmt.Errorf("creating backup: %w", err)
+		}
+		for _, sealDir := range sealDirs {
+			if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
+				return fmt.Errorf("writing backup to %s: %w", sealDir, err)
+			}
+		}
+		fmt.Println("  Key backups updated.")
+	}
+
+	for i, sealDir := range sealDirs {
+		git := gitops.New(sealDir)
+		if err := git.AddAll(); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfgs[i].Seal.DeviceID)); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+	}
+	return nil
 }
 
 func init() {
