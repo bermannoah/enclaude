@@ -266,7 +266,7 @@ remote must not be able to switch the gate off. To apply sensitive changes, run
 |---------|-------------|
 | `log` | Show seal history with commit messages |
 | `diff [ref]` | Decrypt and diff between current state and a previous commit |
-| `rollback <ref>` | Restore `~/.claude/` to a previous commit (creates a safety seal first, so you can always undo) |
+| `rollback <ref>` | Restore the source directory to a previous commit (creates a safety seal first; add `--yes` to apply sensitive resources) |
 
 ### Key Management
 | Command | Description |
@@ -420,6 +420,8 @@ Like git itself, `enclaude` stores objects by their content hash. When you seal 
 
 On the next seal, unchanged files produce the same hash and are skipped entirely. Only new or modified files are encrypted. This makes incremental seals fast — typically under 1 second after a normal session.
 
+Manifest keys are stored with forward slashes and are re-validated on every unseal, so a store written on one operating system restores correctly on another and a crafted key cannot escape the source directory.
+
 ### Session Lifecycle
 
 With hooks installed, the flow is:
@@ -432,7 +434,7 @@ Claude Code runs (reads/writes ~/.claude/ as normal)
 Session ends → hook fires → seal changes + push
 ```
 
-The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code. Mutating CLI commands (`seal`, `unseal`, `pull`, `push`, `sync`, `repair`, `rollback`, `key rotate`) take the same lock (waiting up to 30 seconds), so a manual command and a session hook can't race on the manifest or the local state files.
 
 ### New Device Onboarding
 

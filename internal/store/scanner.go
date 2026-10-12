@@ -68,7 +68,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 		}
 
 		results = append(results, ScanResult{
-			RelPath:   rel,
+			RelPath:   filepath.ToSlash(rel),
 			AbsPath:   path,
 			Size:      info.Size(),
 			ModTimeMs: info.ModTime().UnixMilli(),

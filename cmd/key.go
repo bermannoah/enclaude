@@ -120,6 +120,12 @@ var keyRotateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sealDir := getSealDir()
 
+		release, err := acquireSealLock(sealDir)
+		if err != nil {
+			return err
+		}
+		defer release()
+
 		oldIdentity, _, err := crypto.LoadKey(sealDir)
 		if err != nil {
 			return fmt.Errorf("loading current key: %w", err)

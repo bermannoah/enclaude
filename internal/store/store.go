@@ -318,7 +318,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		if ValidateRelPath(path) != nil {
 			continue // never joined with the source dir; repair drops these
 		}
-		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, relToOS(path))); err == nil {
 			continue // still on disk (e.g. a narrow include no longer scans it)
 		}
 		if verbose {
@@ -409,7 +409,7 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 		if opts.Progress != nil {
 			opts.Progress(i, stats.Total, relPath)
 		}
-		absPath := filepath.Join(cfg.Seal.SourceDir, relPath)
+		absPath := filepath.Join(cfg.Seal.SourceDir, relToOS(relPath))
 
 		// Check if file already exists and matches
 		if existing, err := os.ReadFile(absPath); err == nil {
@@ -495,7 +495,7 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 		if ValidateRelPath(path) != nil {
 			continue
 		}
-		absPath := filepath.Join(cfg.Seal.SourceDir, path)
+		absPath := filepath.Join(cfg.Seal.SourceDir, relToOS(path))
 		if err := os.Remove(absPath); err == nil {
 			stats.Deleted++
 			if opts.Verbose {
@@ -812,7 +812,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
-		absPath := filepath.Join(cfg.Seal.SourceDir, path)
+		absPath := filepath.Join(cfg.Seal.SourceDir, relToOS(path))
 		plaintext, err := os.ReadFile(absPath)
 		if err != nil {
 			continue // plaintext not available

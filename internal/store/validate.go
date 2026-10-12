@@ -18,10 +18,19 @@ func ValidateRelPath(rel string) error {
 	if strings.IndexByte(rel, 0) >= 0 {
 		return fmt.Errorf("path contains a NUL byte")
 	}
-	if !filepath.IsLocal(rel) {
+	// Manifest keys are slash-separated, but treat backslashes as separators
+	// too so a key that looks local on Unix cannot traverse on Windows.
+	norm := strings.ReplaceAll(rel, "\\", "/")
+	if !filepath.IsLocal(filepath.FromSlash(norm)) {
 		return fmt.Errorf("path is absolute or escapes the source directory")
 	}
 	return nil
+}
+
+// relToOS converts a (slash-separated) manifest key to an OS path fragment for
+// joining with the source directory.
+func relToOS(rel string) string {
+	return filepath.FromSlash(rel)
 }
 
 // ValidHash reports whether h is a 64-character hex SHA-256 content hash.

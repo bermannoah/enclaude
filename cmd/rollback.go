@@ -6,8 +6,8 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
-	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +40,12 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.SourceDir = sourceDir
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	git := gitops.New(sealDir)
 	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
@@ -54,6 +60,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if !rollbackForce {
 		fmt.Printf("This will restore the source directory to the state at %s.\n", ui.Cyan(ref))
 		fmt.Println("A safety commit of the current state will be created first.")
+		fmt.Println("Settings, instructions, and other sensitive resources are only applied with --yes.")
 		fmt.Printf("Use %s to skip this confirmation.\n\n", ui.Faint("--force"))
 		fmt.Print("Continue? [y/N] ")
 		var answer string
@@ -105,13 +112,15 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		fmt.Println("    Already at requested state.")
 	}
 
-	// Step 4: Unseal
+	// Step 4: Unseal. Sensitive resources (code, instructions, routing) are only
+	// applied with --yes, matching unseal/pull/sync.
 	fmt.Println("4/4 Unsealing restored state...")
-	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowSensitiveResources: true})
+	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowSensitiveResources: flagYes})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("    %s\n", unsealStats)
+	warnSkippedSensitive(unsealStats)
 
 	fmt.Printf("\n%s Rolled back to %s.\n", ui.Green("Done."), ref)
 	fmt.Println("The pre-rollback state is preserved in git history.")

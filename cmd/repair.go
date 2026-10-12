@@ -62,6 +62,12 @@ func runRepair(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	fmt.Println("Repairing seal store...")
 	result, err := store.Repair(cfg, identity, repairDeleteOrphans, flagVerbose)
 	if err != nil {

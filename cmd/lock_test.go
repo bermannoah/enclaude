@@ -1,0 +1,34 @@
+package cmd
+
+import (
+	"testing"
+	"time"
+
+	"github.com/coredipper/enclaude/internal/session"
+)
+
+func TestAcquireSealLockExcludesConcurrent(t *testing.T) {
+	sealDir := t.TempDir()
+
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		t.Fatalf("acquireSealLock() error: %v", err)
+	}
+
+	// A second acquisition must not succeed while the first is held. Acquire
+	// reports a timeout as an error, so either outcome (error or false) is fine.
+	held := session.NewSealLock(sealDir)
+	acquired, err := held.Acquire(150 * time.Millisecond)
+	if err == nil && acquired {
+		held.Release()
+		t.Error("seal lock was acquired twice concurrently")
+	}
+
+	release()
+
+	again, err := acquireSealLock(sealDir)
+	if err != nil {
+		t.Fatalf("re-acquire after release: %v", err)
+	}
+	again()
+}

@@ -39,6 +39,12 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.SourceDir = sourceDir
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	git := gitops.New(sealDir)
 
 	if !git.HasRemote(remote) {
