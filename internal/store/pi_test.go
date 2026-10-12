@@ -184,3 +184,29 @@ func TestSealNoChangesDoesNotRewriteManifest(t *testing.T) {
 		t.Error("manifest changed on a no-op seal")
 	}
 }
+
+func TestPiMergeStrategyResolution(t *testing.T) {
+	cfg := config.DefaultConfigForSource(config.SourcePi, "/tmp/pi", "/tmp/seal")
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"settings.json", "last_write_wins"},
+		{"models.json", "last_write_wins"},
+		{"models-store.json", "last_write_wins"},
+		{"auth.json", "last_write_wins"},
+		{"sessions/--Users-aura-code-proj--/2026-01-01T00-00-00-000Z_abc.jsonl", "immutable"},
+		{"extensions/hello.ts", "text_merge"},
+		{"extensions/nested/index.js", "text_merge"},
+		{"skills/review/SKILL.md", "text_merge"},
+		{"prompts/summarize.md", "text_merge"},
+		{"AGENTS.md", "text_merge"},
+		{"themes/dark.json", "last_write_wins"},
+	}
+	for _, tc := range cases {
+		if got := ResolveMergeStrategy(tc.path, cfg.Merge); got != tc.want {
+			t.Errorf("ResolveMergeStrategy(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
