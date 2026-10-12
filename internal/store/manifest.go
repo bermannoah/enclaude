@@ -10,10 +10,10 @@ import (
 
 // Manifest tracks all files in the seal store with their content hashes and metadata.
 type Manifest struct {
-	Version  int                    `json:"version"`
-	DeviceID string                 `json:"device_id"`
-	SealedAt string                 `json:"sealed_at"`
-	Files    map[string]FileEntry   `json:"files"`
+	Version  int                  `json:"version"`
+	DeviceID string               `json:"device_id"`
+	SealedAt string               `json:"sealed_at"`
+	Files    map[string]FileEntry `json:"files"`
 }
 
 // FileEntry describes a single file in the seal store.
@@ -23,6 +23,9 @@ type FileEntry struct {
 	SizeEncrypted int64  `json:"size_encrypted"`
 	Mtime         string `json:"mtime"`
 	MergeStrategy string `json:"merge_strategy"`
+	// Mode is the file's permission bits (0o777). Zero means unknown; unseal
+	// falls back to 0600 and applies the mode explicitly after writing.
+	Mode uint32 `json:"mode,omitempty"`
 	// For JSONL files, track line count for efficient dedup merge
 	JSONLLineCount int `json:"jsonl_line_count,omitempty"`
 	// Whether a session file is complete (immutable)

@@ -101,15 +101,20 @@ func getSourceDir() string {
 
 // resolveSourceDir returns the directory that seal/unseal should operate on.
 //
-// A non-default source_dir recorded in seal.toml (which is synced and may come
-// from a compromised remote) is not trusted: the user must confirm it locally
-// with --source-dir, otherwise commands fail closed. Default installs need no
-// flag at all, and are therefore immune to source_dir tampering.
+// Both the source profile and a non-default source_dir may only be trusted from
+// local state (flags, environment, or the built-in default), never from the
+// synced seal.toml. This prevents a compromised remote from redirecting
+// operations to another directory or another agent's default.
 func resolveSourceDir(cfg *config.Config) (string, error) {
+	local := getSource()
 	if flagSourceDir != "" {
 		return flagSourceDir, nil
 	}
-	def := defaultSourceDir(cfg.Source())
+	if cfg.Source() != local {
+		return "", fmt.Errorf("seal.toml records source %q but this command is using %q; pass --source %s (or --source-dir) to confirm",
+			cfg.Source(), local, cfg.Source())
+	}
+	def := defaultSourceDir(local)
 	if cfg.Seal.SourceDir != "" && filepath.Clean(cfg.Seal.SourceDir) != filepath.Clean(def) {
 		return "", fmt.Errorf("seal.toml records source_dir %q, which differs from the local default %q; pass --source-dir %q to confirm",
 			cfg.Seal.SourceDir, def, cfg.Seal.SourceDir)

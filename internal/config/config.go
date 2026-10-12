@@ -91,6 +91,25 @@ func DefaultConfirmPatterns() []string {
 	}
 }
 
+// EffectiveConfirmPatterns returns the built-in confirmation set unioned with
+// any configured patterns. The synced seal.toml can only *add* confirmations,
+// never remove them: otherwise a compromised remote could set
+// `[confirm] patterns = []` and push code that auto-unseal would apply.
+func EffectiveConfirmPatterns(configured []string) []string {
+	out := DefaultConfirmPatterns()
+	seen := make(map[string]bool, len(out))
+	for _, p := range out {
+		seen[p] = true
+	}
+	for _, p := range configured {
+		if p != "" && !seen[p] {
+			out = append(out, p)
+			seen[p] = true
+		}
+	}
+	return out
+}
+
 // NormalizeSource maps user-provided source names onto the canonical values.
 // Unknown or empty values fall back to the Claude profile so existing seals
 // keep working.

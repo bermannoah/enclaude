@@ -208,6 +208,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 			SizeEncrypted:  int64(len(mergedEncrypted)),
 			Mtime:          time.Now().UTC().Format(time.RFC3339),
 			MergeStrategy:  string(strategy),
+			Mode:           oursEntry.Mode,
 			JSONLLineCount: oursEntry.JSONLLineCount + theirsEntry.JSONLLineCount, // approximate
 		}
 

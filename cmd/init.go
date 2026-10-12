@@ -129,7 +129,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write .gitignore
-	gitignore := "# Never commit the unencrypted key\n*.key\n"
+	gitignore := "# Never commit the unencrypted key\n*.key\n# Local-only state (only present if .git is unavailable)\n.enclaude-*.json\n"
 	if err := os.WriteFile(filepath.Join(sealDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}

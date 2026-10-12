@@ -103,7 +103,7 @@ enclaude hooks install
 enclaude hooks install
 ```
 
-This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites. For pi.dev, install a managed extension instead with `enclaude hooks install --source pi`; see [pi.dev support](#pidev-support).
+This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites. For pi.dev, install a managed extension instead with `enclaude hooks install --source pi`; see [pi.dev support](#pidev-support). Because the managed hook records the local binary, seal-store, and source paths, re-running `enclaude hooks install` refreshes them — do this after [restoring a store on a new device](#new-device-onboarding).
 
 ## pi.dev Support
 
@@ -226,8 +226,10 @@ manifest (tracked as *pending*, in the store's `.git` directory and never
 synced) so a later seal does not mistake it for a local deletion. `enclaude pull`
 and `enclaude sync` behave the same way and accept `--yes`.
 
-The set is configurable via `[confirm]` in `seal.toml`: add patterns to gate more,
-or set `patterns = []` to disable confirmation entirely (not recommended).
+The set is extensible via `[confirm]` in `seal.toml`, but only *additively*: the
+built-in patterns always apply, because `seal.toml` is synced and a compromised
+remote must not be able to switch the gate off. To apply sensitive changes, run
+`enclaude unseal --yes` for that restore.
 
 > This gate covers *unattended* application of behavior-changing files. It does
 > not make synced session history safe to resume: a hostile session still feeds
@@ -357,25 +359,29 @@ patterns = [
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
 
-# Paths whose remote changes require `enclaude unseal --yes` before they are
-# written (code, auto-applied instructions, request routing). Optional: when
-# absent the built-in default set is used. `patterns = []` disables the gate.
+# Additional paths whose remote changes require `enclaude unseal --yes`. This
+# is additive: the built-in set (code, auto-applied instructions, request
+# routing) always applies and cannot be removed here, since seal.toml is synced.
 [confirm]
 patterns = [
-  "settings.json", "mcp.json", "models.json",
-  "extensions/**", "tools/**", "skills/**", "prompts/**", "commands/**",
-  "SYSTEM.md", "APPEND_SYSTEM.md",
-  "AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "RTK.md",
+  "notes/**",
 ]
 ```
 
 The `source_dir` in `seal.toml` is a hint, not an authority. Because `seal.toml`
-is synced from the remote, enclaude ignores it for filesystem operations unless
-it matches the local default (`~/.claude`, `~/.pi/agent`, or `PI_CODING_AGENT_DIR`)
-or you pass `--source-dir`. A default install therefore never reads or writes
+is synced from the remote, neither the `source` profile nor `source_dir` is
+trusted for filesystem operations: enclaude uses the locally selected profile
+and its default directory (`~/.claude`, `~/.pi/agent`, or `PI_CODING_AGENT_DIR`)
+unless it matches what `seal.toml` records, and otherwise fails closed and asks
+for `--source`/`--source-dir`. A default install therefore never reads or writes
 outside its expected directory, even if the remote is compromised. Custom layouts
 must pass `--source-dir` on every command (put it in an alias). `seal_dir` is
 likewise pinned to the location the config was loaded from.
+
+For the same reason, unseal only deletes files it has actually sealed before,
+tracked in a local, non-synced ledger under the store's `.git` directory. A
+compromised remote can therefore not broaden `[include]` to make unseal delete
+files that were never part of the seal.
 
 ## Security Model
 
@@ -388,7 +394,7 @@ likewise pinned to the location the config was loaded from.
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
 | Tamper detection | SHA-256 content hashes in manifest; `repair --check` verifies integrity |
 | Manifest path safety | Unseal validates every path and content hash; entries that are absolute, traverse (`../`), or carry a malformed hash are refused and can be dropped with `repair` |
-| Remote trust boundary | The remote is untrusted for paths; changed sensitive resources are not auto-applied (see [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal)) |
+| Remote trust boundary | The remote is untrusted for paths, source profile/dir, and deletion scope; changed sensitive resources are not auto-applied (see [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal)) |
 | Key never in git | Correct — only the passphrase-encrypted backup is committed |
 | Credentials | `auth.json`, `oauth.json`, and `mcp-auth.json` are excluded from the seal by default (see [Credentials](#credentials)) |
 
@@ -398,7 +404,7 @@ likewise pinned to the location the config was loaded from.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
 - **Keychain entries are tied to the seal store path.** Moving a seal store does not carry its key with it; re-import the key after relocating a store. See [Key Management](#key-management).
-- **A synced store is a code-execution boundary.** It carries sensitive resources: code (settings, extensions, tools, skills, prompts), auto-applied instructions (`SYSTEM.md`, `AGENTS.md`, …), and request routing (`models.json`). enclaude refuses to auto-apply changed sensitive resources, but once you run `unseal --yes` (or if you disable that protection) a compromised remote can run code, rewrite the system prompt, or redirect model traffic. Treat the remote as trusted, and review changes with `enclaude diff` before applying them. See [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal).
+- **A synced store is a code-execution boundary.** It carries sensitive resources: code (settings, extensions, tools, skills, prompts), auto-applied instructions (`SYSTEM.md`, `AGENTS.md`, …), and request routing (`models.json`). enclaude refuses to auto-apply changed sensitive resources, but once you run `unseal --yes` a compromised remote can run code, rewrite the system prompt, or redirect model traffic. Treat the remote as trusted, and review changes with `enclaude diff` before applying them. See [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal).
 
 ## How It Works Under the Hood
 

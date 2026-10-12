@@ -30,31 +30,31 @@ Existing settings and extensions are preserved.`,
 		}
 
 		if source == config.SourcePi {
-			if gitops.PiHooksInstalled(dir) {
-				fmt.Println("Seal hooks are already installed.")
-				return nil
-			}
-			fmt.Println("Installing seal extension for pi.dev...")
+			already := gitops.PiHooksInstalled(dir)
 			if err := gitops.InstallPiHooks(dir, getSealDir()); err != nil {
 				return fmt.Errorf("installing pi hooks: %w", err)
 			}
-			fmt.Printf("  Wrote %s\n", gitops.PiExtensionPath(dir))
+			if already {
+				fmt.Printf("Refreshed seal extension at %s\n", gitops.PiExtensionPath(dir))
+			} else {
+				fmt.Println("Installing seal extension for pi.dev...")
+				fmt.Printf("  Wrote %s\n", gitops.PiExtensionPath(dir))
+			}
 			fmt.Println("  session_start:    pull + unseal")
 			fmt.Println("  session_shutdown: seal + push")
 			fmt.Println("\nHooks installed. Existing extensions were preserved.")
 			return nil
 		}
 
-		if gitops.HooksInstalled(dir) {
-			fmt.Println("Seal hooks are already installed.")
-			return nil
-		}
-
-		fmt.Println("Installing seal hooks into settings.json...")
+		already := gitops.HooksInstalled(dir)
 		if err := gitops.InstallHooks(dir, getSealDir()); err != nil {
 			return fmt.Errorf("installing hooks: %w", err)
 		}
-
+		if already {
+			fmt.Println("Refreshed seal hooks in settings.json (device paths updated).")
+		} else {
+			fmt.Println("Installing seal hooks into settings.json...")
+		}
 		fmt.Println("  SessionStart hook: pull + unseal on session start")
 		fmt.Println("  SessionEnd hook:   seal + push on session end (async)")
 		fmt.Println("\nHooks installed. Existing hooks were preserved.")

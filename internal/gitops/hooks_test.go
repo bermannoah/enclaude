@@ -404,3 +404,36 @@ func TestHooksInstalledFalseWhenMissing(t *testing.T) {
 		t.Error("should return false when no settings.json")
 	}
 }
+
+func TestInstallHooksRefreshesStalePaths(t *testing.T) {
+	dir := t.TempDir()
+	settings := map[string]any{"hooks": map[string]any{}}
+	data, _ := json.MarshalIndent(settings, "", "  ")
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallHooks(dir, "/old/seal"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate another device's paths arriving via the synced settings.json.
+	raw, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
+	stale := strings.ReplaceAll(string(raw), "/old/seal", "/stale/seal")
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(stale), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallHooks(dir, "/new/seal"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if strings.Contains(string(out), "/stale/seal") {
+		t.Errorf("stale seal path was not refreshed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "/new/seal") {
+		t.Errorf("new seal path missing after refresh:\n%s", out)
+	}
+	if n := strings.Count(string(out), hookMarker); n != 2 {
+		t.Errorf("hook marker appears %d times, want 2", n)
+	}
+}

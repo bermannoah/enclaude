@@ -193,7 +193,11 @@ func HooksInstalled(claudeDir string) bool {
 	return hasSealHook(hooks, "SessionStart") && hasSealHook(hooks, "SessionEnd")
 }
 
-// addHookEntry appends a hook entry to an event's array, skipping if already present.
+// addHookEntry appends a hook entry to an event's array, or refreshes the
+// command of an existing managed hook. Refreshing matters because the managed
+// command embeds device-specific paths (binary, seal dir, source dir) and
+// settings.json is synced: a store restored on another device carries the
+// origin device's paths until `hooks install` rewrites them here.
 func addHookEntry(hooks map[string]json.RawMessage, event string, entry hookEntry) error {
 	var entries []hookEntry
 	if raw, ok := hooks[event]; ok {
@@ -202,17 +206,20 @@ func addHookEntry(hooks map[string]json.RawMessage, event string, entry hookEntr
 		}
 	}
 
-	// Check if seal hook already exists (marker-only — legacy hooks
-	// are migrated before addHookEntry is called)
-	for _, e := range entries {
-		for _, h := range e.Hooks {
-			if hasMarker(h.Command) {
-				return nil // already installed
+	// Refresh an existing managed hook in place (preserving the matcher and any
+	// sibling hooks), otherwise append a new entry.
+	refreshed := false
+	for i := range entries {
+		for j := range entries[i].Hooks {
+			if hasMarker(entries[i].Hooks[j].Command) && len(entry.Hooks) > 0 {
+				entries[i].Hooks[j] = entry.Hooks[0]
+				refreshed = true
 			}
 		}
 	}
-
-	entries = append(entries, entry)
+	if !refreshed {
+		entries = append(entries, entry)
+	}
 
 	data, err := json.Marshal(entries)
 	if err != nil {

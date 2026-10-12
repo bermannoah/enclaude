@@ -31,12 +31,12 @@ func TestResolveSourceDirRequiresFlagForCustomDir(t *testing.T) {
 }
 
 // TestResolveSourceDirAllowsLocalDefault verifies that a default install needs
-// no flag and ignores whatever the config records as long as it matches.
+// no source-dir flag when the locally selected source matches the store.
 func TestResolveSourceDirAllowsLocalDefault(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", "/tmp/env-pi-dir")
-	prev := flagSourceDir
-	flagSourceDir = ""
-	defer func() { flagSourceDir = prev }()
+	prevDir, prevSource := flagSourceDir, flagSource
+	flagSourceDir, flagSource = "", "pi"
+	defer func() { flagSourceDir, flagSource = prevDir, prevSource }()
 
 	cfg := config.DefaultConfigForSource(config.SourcePi, "/tmp/env-pi-dir", "/tmp/seal")
 	dir, err := resolveSourceDir(cfg)
@@ -45,5 +45,18 @@ func TestResolveSourceDirAllowsLocalDefault(t *testing.T) {
 	}
 	if dir != "/tmp/env-pi-dir" {
 		t.Errorf("dir = %q, want /tmp/env-pi-dir", dir)
+	}
+}
+
+// TestResolveSourceDirRejectsProfileMismatch verifies R3: the synced source
+// field cannot switch the local profile.
+func TestResolveSourceDirRejectsProfileMismatch(t *testing.T) {
+	prevDir, prevSource := flagSourceDir, flagSource
+	flagSourceDir, flagSource = "", "claude"
+	defer func() { flagSourceDir, flagSource = prevDir, prevSource }()
+
+	cfg := config.DefaultConfigForSource(config.SourcePi, "/tmp/env-pi-dir", "/tmp/seal")
+	if _, err := resolveSourceDir(cfg); err == nil {
+		t.Fatal("expected an error when the store's source disagrees with the local profile")
 	}
 }

@@ -109,18 +109,19 @@ func SensitiveReason(relPath string) string {
 	}
 }
 
-// pendingFile holds paths whose remote executable version was skipped during an
-// unseal. It lives under .git so it is never committed or synced.
-func pendingFile(sealDir string) string {
+// localStateFile returns a path for local, non-synced state. It lives under
+// .git so it is never committed or synced; the worktree fallback is only used
+// when there is no .git directory (and is covered by .gitignore).
+func localStateFile(sealDir, name string) string {
 	gitDir := filepath.Join(sealDir, ".git")
 	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-		return filepath.Join(gitDir, "enclaude-pending.json")
+		return filepath.Join(gitDir, name)
 	}
-	return filepath.Join(sealDir, ".enclaude-pending.json")
+	return filepath.Join(sealDir, ".enclaude-"+name)
 }
 
-func loadPending(sealDir string) map[string]bool {
-	data, err := os.ReadFile(pendingFile(sealDir))
+func loadPathSet(path string) map[string]bool {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return map[string]bool{}
 	}
@@ -135,16 +136,15 @@ func loadPending(sealDir string) map[string]bool {
 	return out
 }
 
-func savePending(sealDir string, pending map[string]bool) error {
-	path := pendingFile(sealDir)
-	if len(pending) == 0 {
+func savePathSet(path string, set map[string]bool) error {
+	if len(set) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
 	}
-	paths := make([]string, 0, len(pending))
-	for p := range pending {
+	paths := make([]string, 0, len(set))
+	for p := range set {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
@@ -153,6 +153,39 @@ func savePending(sealDir string, pending map[string]bool) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+// pendingFile holds paths whose remote sensitive version was skipped during an
+// unseal, so a later seal does not treat them as local deletions.
+func pendingFile(sealDir string) string { return localStateFile(sealDir, "pending.json") }
+
+func loadPending(sealDir string) map[string]bool { return loadPathSet(pendingFile(sealDir)) }
+
+func savePending(sealDir string, pending map[string]bool) error {
+	return savePathSet(pendingFile(sealDir), pending)
+}
+
+// managedFile is the local ledger of paths this device has sealed. Deletions
+// are decided against this ledger rather than the synced include patterns, so a
+// compromised remote cannot cause unseal to delete files that were never sealed.
+func managedFile(sealDir string) string { return localStateFile(sealDir, "managed.json") }
+
+func loadManaged(sealDir string) map[string]bool { return loadPathSet(managedFile(sealDir)) }
+
+// saveManaged always writes the ledger, even when empty, so its existence marks
+// that the ledger has been initialized and must not be re-seeded from the
+// (possibly remote) manifest.
+func saveManaged(sealDir string, managed map[string]bool) error {
+	paths := make([]string, 0, len(managed))
+	for p := range managed {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	data, err := json.MarshalIndent(paths, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(managedFile(sealDir), data, 0600)
 }
 
 // ProgressFunc is called during long operations to report progress.
@@ -258,26 +291,49 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 			SizeEncrypted:   int64(len(encrypted)),
 			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
 			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+			Mode:            f.Mode,
 			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionComplete(f.RelPath),
 		}
 	}
 
-	// Mark deleted files. Paths that are pending (remote executable resources
-	// intentionally skipped on unseal) are kept in the manifest so a later seal
-	// does not mistake the missing local file for a deletion and drop it.
+	// Decide deletions against the local managed-path ledger, not the synced
+	// include patterns. A manifest entry is dropped only if this device has
+	// sealed it before and it is genuinely gone from disk; entries this device
+	// never had (remote-only, pending, or merely excluded by a narrow include)
+	// are kept. This stops a compromised seal.toml from causing data loss.
 	pending := loadPending(sealDir)
-	for path := range manifest.Files {
-		if !seen[path] {
-			if pending[path] {
-				continue
-			}
-			if verbose {
-				fmt.Printf("  [del] %s\n", path)
-			}
-			delete(manifest.Files, path)
-			stats.Deleted++
+	managed := loadManaged(sealDir)
+	if _, err := os.Stat(managedFile(sealDir)); os.IsNotExist(err) {
+		// First run against an existing store: seed from the manifest so
+		// pre-upgrade local deletions still propagate, then maintain locally.
+		for path := range manifest.Files {
+			managed[path] = true
 		}
+	}
+	for path := range manifest.Files {
+		if seen[path] || pending[path] || !managed[path] {
+			continue
+		}
+		if ValidateRelPath(path) != nil {
+			continue // never joined with the source dir; repair drops these
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {
+			continue // still on disk (e.g. a narrow include no longer scans it)
+		}
+		if verbose {
+			fmt.Printf("  [del] %s\n", path)
+		}
+		delete(manifest.Files, path)
+		stats.Deleted++
+	}
+
+	// Everything scanned on disk is managed by this device.
+	for path := range seen {
+		managed[path] = true
+	}
+	if err := saveManaged(sealDir, managed); err != nil {
+		return stats, fmt.Errorf("saving managed ledger: %w", err)
 	}
 
 	// Pending paths that now exist locally (sealed, unchanged, or manually
@@ -342,13 +398,10 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 	stats.Total = len(manifest.Files)
 	pending := loadPending(sealDir)
 
-	// Confirmation patterns come from the config; a nil list (hand-built
-	// configs) falls back to the safe default set, while an explicitly empty
-	// list disables gating.
-	confirmPatterns := cfg.Confirm.Patterns
-	if confirmPatterns == nil {
-		confirmPatterns = config.DefaultConfirmPatterns()
-	}
+	// Confirmation patterns are the built-in safe set unioned with any patterns
+	// from seal.toml. The synced config can only add confirmations, never remove
+	// them, so a compromised remote cannot disable this gate.
+	confirmPatterns := config.EffectiveConfirmPatterns(cfg.Confirm.Patterns)
 
 	i := 0
 	for relPath, entry := range manifest.Files {
@@ -394,13 +447,22 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 			continue
 		}
 
-		// Write to the source directory
+		// Write to the source directory, then apply the recorded permission bits
+		// (WriteFile only honors the mode when creating a new file).
 		dir := filepath.Dir(absPath)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			stats.Errors++
 			continue
 		}
-		if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
+		mode := os.FileMode(entry.Mode) & 0o777
+		if mode == 0 {
+			mode = 0600
+		}
+		if err := os.WriteFile(absPath, plaintext, mode); err != nil {
+			stats.Errors++
+			continue
+		}
+		if err := os.Chmod(absPath, mode); err != nil {
 			stats.Errors++
 			continue
 		}
@@ -417,43 +479,31 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 		return stats, fmt.Errorf("saving pending state: %w", err)
 	}
 
-	// Delete managed files not in the manifest. The manifest is the source
-	// of truth — after git pull/merge, it reflects the intended state
-	// including remote deletions. Skip if restore had errors (incomplete
-	// unseal should not trigger deletions).
+	// Delete files this device previously managed that are no longer in the
+	// manifest (remote deletion). Deletions are driven by the local managed
+	// ledger, never by the synced include patterns, so a compromised remote can
+	// only delete files that were actually sealed — not arbitrary files that
+	// happen to match a broadened include. Skip if restore had errors.
 	if stats.Errors > 0 {
 		return stats, nil
 	}
-	existingFiles, scanErr := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
-	if scanErr != nil {
-		if opts.Verbose {
-			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
+	managed := loadManaged(sealDir)
+	for path := range managed {
+		if _, inManifest := manifest.Files[path]; inManifest {
+			continue
 		}
-		stats.Errors++
-		return stats, nil
-	}
-	{
-		manifestPaths := make(map[string]bool, len(manifest.Files))
-		for relPath := range manifest.Files {
-			manifestPaths[relPath] = true
+		if ValidateRelPath(path) != nil {
+			continue
 		}
-		for _, f := range existingFiles {
-			if !manifestPaths[f.RelPath] {
-				if err := os.Remove(f.AbsPath); err == nil {
-					stats.Deleted++
-					if opts.Verbose {
-						fmt.Printf("  [delete] %s\n", f.RelPath)
-					}
-					dir := filepath.Dir(f.AbsPath)
-					if dir != cfg.Seal.SourceDir {
-						os.Remove(dir)
-					}
-				} else {
-					stats.Errors++
-					if opts.Verbose {
-						fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
-					}
-				}
+		absPath := filepath.Join(cfg.Seal.SourceDir, path)
+		if err := os.Remove(absPath); err == nil {
+			stats.Deleted++
+			if opts.Verbose {
+				fmt.Printf("  [delete] %s\n", path)
+			}
+			dir := filepath.Dir(absPath)
+			if dir != cfg.Seal.SourceDir {
+				os.Remove(dir)
 			}
 		}
 	}

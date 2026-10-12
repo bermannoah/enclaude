@@ -240,7 +240,7 @@ func TestUnsealGatesInstructionsAndRouting(t *testing.T) {
 	}
 }
 
-func TestUnsealConfirmEmptyDisablesGating(t *testing.T) {
+func TestUnsealConfirmCannotBeDisabledFromConfig(t *testing.T) {
 	piDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(piDir, "settings.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
@@ -255,16 +255,105 @@ func TestUnsealConfirmEmptyDisablesGating(t *testing.T) {
 
 	restoreDir := t.TempDir()
 	cfgRestore := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
-	cfgRestore.Confirm.Patterns = []string{} // explicit opt-out
+	cfgRestore.Confirm.Patterns = []string{} // a compromised remote tries this
 
 	stats, err := Unseal(cfgRestore, identity, UnsealOptions{})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
-	if len(stats.SkippedSensitive) != 0 {
-		t.Errorf("SkippedSensitive = %v, want none when [confirm] is empty", stats.SkippedSensitive)
+	if len(stats.SkippedSensitive) != 1 || stats.SkippedSensitive[0] != "settings.json" {
+		t.Errorf("SkippedSensitive = %v, want [settings.json] (config must not disable the gate)", stats.SkippedSensitive)
 	}
-	if _, err := os.Stat(filepath.Join(restoreDir, "settings.json")); err != nil {
-		t.Error("settings.json should have been restored with gating disabled")
+	if _, err := os.Stat(filepath.Join(restoreDir, "settings.json")); err == nil {
+		t.Error("settings.json was written even though the built-in gate should still apply")
+	}
+}
+
+func TestUnsealConfirmCanAddPatterns(t *testing.T) {
+	piDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(piDir, "notes.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfgSeal := config.DefaultConfigForSource(config.SourcePi, piDir, sealDir)
+	cfgSeal.Include.Patterns = append(cfgSeal.Include.Patterns, "notes.txt")
+	if _, err := Seal(cfgSeal, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreDir := t.TempDir()
+	cfgRestore := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
+	cfgRestore.Confirm.Patterns = []string{"notes.txt"} // additive
+
+	stats, err := Unseal(cfgRestore, identity, UnsealOptions{})
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+	if len(stats.SkippedSensitive) != 1 || stats.SkippedSensitive[0] != "notes.txt" {
+		t.Errorf("SkippedSensitive = %v, want [notes.txt]", stats.SkippedSensitive)
+	}
+}
+
+func TestUnsealBroadenedIncludeDoesNotDeleteUnmanaged(t *testing.T) {
+	src := t.TempDir()
+	for _, f := range []string{"a.txt", "b.txt", "secret.json"} {
+		if err := os.WriteFile(filepath.Join(src, f), []byte(f), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	cfg.Include.Patterns = []string{"a.txt"} // only a.txt is sealed/managed
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a compromised remote rewriting seal.toml's include to "**".
+	cfg.Include.Patterns = []string{"**"}
+	cfg.Exclude.Patterns = nil
+	if _, err := Unseal(cfg, identity, UnsealOptions{AllowSensitiveResources: true}); err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	for _, f := range []string{"a.txt", "b.txt", "secret.json"} {
+		if _, err := os.Stat(filepath.Join(src, f)); err != nil {
+			t.Errorf("never-sealed %s was deleted by a broadened include: %v", f, err)
+		}
+	}
+}
+
+func TestUnsealRestoresExecutableBit(t *testing.T) {
+	src := t.TempDir()
+	script := filepath.Join(src, "tools", "run.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	restore := t.TempDir()
+	cfg2 := config.DefaultConfigForSource(config.SourcePi, restore, sealDir)
+	if _, err := Unseal(cfg2, identity, UnsealOptions{AllowSensitiveResources: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(filepath.Join(restore, "tools", "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("restored mode = %o, want 755", info.Mode().Perm())
 	}
 }

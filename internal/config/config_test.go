@@ -320,7 +320,7 @@ device_id = "test-device"
 	}
 }
 
-func TestLoadConfirmEmptyDisables(t *testing.T) {
+func TestLoadConfirmEmptyStaysEmpty(t *testing.T) {
 	sealDir := t.TempDir()
 	content := `config_version = 4
 [seal]
@@ -340,9 +340,40 @@ patterns = []
 		t.Fatalf("Load() error: %v", err)
 	}
 	if cfg.Confirm.Patterns == nil {
-		t.Fatal("explicit empty [confirm] patterns should stay non-nil (gating disabled)")
+		t.Fatal("explicit empty [confirm] patterns should stay non-nil")
 	}
 	if len(cfg.Confirm.Patterns) != 0 {
-		t.Errorf("expected no confirm patterns, got %v", cfg.Confirm.Patterns)
+		t.Errorf("expected no configured patterns, got %v", cfg.Confirm.Patterns)
+	}
+	// The built-in set is always enforced, regardless of the synced config.
+	effective := EffectiveConfirmPatterns(cfg.Confirm.Patterns)
+	if len(effective) < len(DefaultConfirmPatterns()) {
+		t.Errorf("effective patterns %d < defaults %d; config must not shrink the set", len(effective), len(DefaultConfirmPatterns()))
+	}
+}
+
+func TestEffectiveConfirmPatternsIsAdditive(t *testing.T) {
+	got := EffectiveConfirmPatterns([]string{"custom/**", "settings.json"})
+	assertContains := func(p string) {
+		for _, g := range got {
+			if g == p {
+				return
+			}
+		}
+		t.Errorf("effective patterns missing %q", p)
+	}
+	assertContains("SYSTEM.md")
+	assertContains("models.json")
+	assertContains("custom/**")
+
+	// No duplicates for a pattern that is already a default.
+	count := 0
+	for _, g := range got {
+		if g == "settings.json" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("settings.json appears %d times, want 1", count)
 	}
 }
