@@ -92,12 +92,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: flagYes})
+		unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowSensitiveResources: flagYes})
 		if err != nil {
 			return fmt.Errorf("unseal: %w", err)
 		}
 		fmt.Printf("    Merged and unsealed: %s\n", unsealStats)
-		warnSkippedExecutable(unsealStats)
+		warnSkippedSensitive(unsealStats)
 	}
 
 	// 3. Push

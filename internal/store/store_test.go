@@ -62,7 +62,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfig(restoreDir, sealDir)
 
-	unsealStats, err := Unseal(cfg2, identity, UnsealOptions{AllowExecutableResources: true})
+	unsealStats, err := Unseal(cfg2, identity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 	manifest.Save(sealDir)
 
 	// Unseal should delete the stale file
-	stats, err := Unseal(cfg, identity, UnsealOptions{AllowExecutableResources: true})
+	stats, err := Unseal(cfg, identity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 	Seal(cfg, identity.Recipient(), false, nil)
 
 	// Unseal should NOT delete the unmanaged file
-	_, err := Unseal(cfg, identity, UnsealOptions{AllowExecutableResources: true})
+	_, err := Unseal(cfg, identity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}

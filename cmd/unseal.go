@@ -66,13 +66,13 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	stats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: flagYes})
+	stats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowSensitiveResources: flagYes})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("  %s\n", stats)
 
-	warnSkippedExecutable(stats)
+	warnSkippedSensitive(stats)
 
 	if stats.Errors > 0 {
 		fmt.Printf("  Warning: %d errors encountered.\n", stats.Errors)
@@ -81,16 +81,16 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// warnSkippedExecutable prints the executable resources that were not written
-// because the user did not pass --yes.
-func warnSkippedExecutable(stats store.UnsealStats) {
-	if len(stats.SkippedExecutable) == 0 {
+// warnSkippedSensitive prints the sensitive resources that were not written
+// because the user did not pass --yes, with a short reason for each.
+func warnSkippedSensitive(stats store.UnsealStats) {
+	if len(stats.SkippedSensitive) == 0 {
 		return
 	}
-	fmt.Printf("\n%s %d executable resource(s) were not written because they can run code or inject context:\n",
-		ui.Yellow("Skipped:"), len(stats.SkippedExecutable))
-	for _, p := range stats.SkippedExecutable {
-		fmt.Printf("  - %s\n", p)
+	fmt.Printf("\n%s %d sensitive resource(s) were not written:\n",
+		ui.Yellow("Skipped:"), len(stats.SkippedSensitive))
+	for _, p := range stats.SkippedSensitive {
+		fmt.Printf("  - %s (%s)\n", p, store.SensitiveReason(p))
 	}
-	fmt.Println("Review the remote changes, then re-run with 'enclaude unseal --yes' to apply them.")
+	fmt.Println("Review with 'enclaude diff', then re-run with 'enclaude unseal --yes' to apply them.")
 }

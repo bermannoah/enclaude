@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/coredipper/enclaude/internal/config"
@@ -47,7 +48,7 @@ func TestUnsealRefusesUnsafeManifestEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := Unseal(cfg, identity, UnsealOptions{AllowExecutableResources: true}); err == nil {
+			if _, err := Unseal(cfg, identity, UnsealOptions{AllowSensitiveResources: true}); err == nil {
 				t.Fatal("expected Unseal to refuse an unsafe manifest entry")
 			}
 
@@ -122,8 +123,8 @@ func TestUnsealGatesExecutableResourcesAndKeepsThemPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
-	if len(stats.SkippedExecutable) != 1 || stats.SkippedExecutable[0] != "settings.json" {
-		t.Errorf("SkippedExecutable = %v, want [settings.json]", stats.SkippedExecutable)
+	if len(stats.SkippedSensitive) != 1 || stats.SkippedSensitive[0] != "settings.json" {
+		t.Errorf("SkippedSensitive = %v, want [settings.json]", stats.SkippedSensitive)
 	}
 	if _, err := os.Stat(filepath.Join(restoreDir, "settings.json")); err == nil {
 		t.Error("settings.json was written without --yes")
@@ -149,12 +150,12 @@ func TestUnsealGatesExecutableResourcesAndKeepsThemPending(t *testing.T) {
 	}
 
 	// With --yes, the executable resource is applied and no longer pending.
-	stats, err = Unseal(cfgRestore, identity, UnsealOptions{AllowExecutableResources: true})
+	stats, err = Unseal(cfgRestore, identity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal(--yes) error: %v", err)
 	}
-	if len(stats.SkippedExecutable) != 0 {
-		t.Errorf("SkippedExecutable = %v, want none", stats.SkippedExecutable)
+	if len(stats.SkippedSensitive) != 0 {
+		t.Errorf("SkippedSensitive = %v, want none", stats.SkippedSensitive)
 	}
 	if _, err := os.Stat(filepath.Join(restoreDir, "settings.json")); err != nil {
 		t.Error("settings.json was not restored with --yes")
@@ -166,5 +167,104 @@ func TestUnsealGatesExecutableResourcesAndKeepsThemPending(t *testing.T) {
 	}
 	if _, err := os.Stat(pendingFile(sealDir)); !os.IsNotExist(err) {
 		t.Error("pending state should be cleared once the resource is applied")
+	}
+}
+
+func TestUnsealGatesInstructionsAndRouting(t *testing.T) {
+	piDir := t.TempDir()
+	files := map[string]string{
+		"settings.json":          `{}`,
+		"SYSTEM.md":              "system prompt\n",
+		"AGENTS.md":              "# instructions\n",
+		"models.json":            `{"providers":{}}`,
+		"sessions/--p--/s.jsonl": `{"type":"session","id":"s"}` + "\n",
+	}
+	for rel, content := range files {
+		abs := filepath.Join(piDir, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfgSeal := config.DefaultConfigForSource(config.SourcePi, piDir, sealDir)
+	if _, err := Seal(cfgSeal, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreDir := t.TempDir()
+	cfgRestore := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
+	stats, err := Unseal(cfgRestore, identity, UnsealOptions{})
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	got := append([]string(nil), stats.SkippedSensitive...)
+	sort.Strings(got)
+	want := []string{"AGENTS.md", "SYSTEM.md", "models.json", "settings.json"}
+	if len(got) != len(want) {
+		t.Fatalf("SkippedSensitive = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SkippedSensitive[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Data is still restored.
+	if _, err := os.Stat(filepath.Join(restoreDir, "sessions", "--p--", "s.jsonl")); err != nil {
+		t.Error("session data should have been restored")
+	}
+	for _, rel := range []string{"SYSTEM.md", "AGENTS.md", "models.json"} {
+		if _, err := os.Stat(filepath.Join(restoreDir, rel)); err == nil {
+			t.Errorf("%s was written without --yes", rel)
+		}
+	}
+
+	// Reasons are human readable.
+	cases := map[string]string{
+		"SYSTEM.md":       "steers the agent",
+		"AGENTS.md":       "steers the agent",
+		"models.json":     "changes request routing",
+		"settings.json":   "runs code",
+		"extensions/x.ts": "runs code",
+	}
+	for path, want := range cases {
+		if got := SensitiveReason(path); got != want {
+			t.Errorf("SensitiveReason(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestUnsealConfirmEmptyDisablesGating(t *testing.T) {
+	piDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(piDir, "settings.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfgSeal := config.DefaultConfigForSource(config.SourcePi, piDir, sealDir)
+	if _, err := Seal(cfgSeal, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreDir := t.TempDir()
+	cfgRestore := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
+	cfgRestore.Confirm.Patterns = []string{} // explicit opt-out
+
+	stats, err := Unseal(cfgRestore, identity, UnsealOptions{})
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+	if len(stats.SkippedSensitive) != 0 {
+		t.Errorf("SkippedSensitive = %v, want none when [confirm] is empty", stats.SkippedSensitive)
+	}
+	if _, err := os.Stat(filepath.Join(restoreDir, "settings.json")); err != nil {
+		t.Error("settings.json should have been restored with gating disabled")
 	}
 }

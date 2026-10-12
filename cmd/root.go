@@ -45,7 +45,7 @@ func init() {
 	// Deprecated alias kept for backwards compatibility.
 	rootCmd.PersistentFlags().StringVar(&flagSourceDir, "claude-dir", "", "alias for --source-dir")
 	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override the seal store location")
-	rootCmd.PersistentFlags().BoolVar(&flagYes, "yes", false, "allow unseal to write executable resources (settings, extensions, tools, skills, prompts)")
+	rootCmd.PersistentFlags().BoolVar(&flagYes, "yes", false, "allow unseal to write sensitive resources (code, instructions, request routing)")
 }
 
 // getSource resolves the active source profile from flags, the ENCLAUDE_SOURCE

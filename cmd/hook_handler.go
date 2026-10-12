@@ -98,9 +98,9 @@ func handleSessionStart() error {
 	if err != nil {
 		logHook("unseal error: %v", err)
 	}
-	if len(stats.SkippedExecutable) > 0 {
-		logHook("skipped %d executable resource(s) pending confirmation; run 'enclaude unseal --yes': %s",
-			len(stats.SkippedExecutable), strings.Join(stats.SkippedExecutable, ", "))
+	if len(stats.SkippedSensitive) > 0 {
+		logHook("skipped %d sensitive resource(s) pending confirmation; run 'enclaude unseal --yes': %s",
+			len(stats.SkippedSensitive), strings.Join(stats.SkippedSensitive, ", "))
 	}
 
 	return nil

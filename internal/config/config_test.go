@@ -273,3 +273,76 @@ func TestLoadPinsSealDirToLoadPath(t *testing.T) {
 		t.Errorf("SealDir = %q, want the load path %q", loaded.Seal.SealDir, sealDir)
 	}
 }
+
+func TestDefaultConfirmPatterns(t *testing.T) {
+	cfg := DefaultConfigForSource("pi", "/tmp/pi", "/tmp/seal")
+	for _, want := range []string{
+		"settings.json",
+		"extensions/**",
+		"SYSTEM.md",
+		"APPEND_SYSTEM.md",
+		"AGENTS.md",
+		"AGENTS.override.md",
+		"CLAUDE.md",
+		"models.json",
+	} {
+		found := false
+		for _, p := range cfg.Confirm.Patterns {
+			if p == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("default confirm patterns missing %q", want)
+		}
+	}
+}
+
+func TestLoadOverlaysConfirmDefaults(t *testing.T) {
+	sealDir := t.TempDir()
+	content := `config_version = 3
+[seal]
+source = "pi"
+source_dir = "/tmp/pi"
+seal_dir = "/tmp/seal"
+device_id = "test-device"
+`
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.Confirm.Patterns) == 0 {
+		t.Fatal("expected confirm defaults to be overlaid")
+	}
+}
+
+func TestLoadConfirmEmptyDisables(t *testing.T) {
+	sealDir := t.TempDir()
+	content := `config_version = 4
+[seal]
+source = "pi"
+source_dir = "/tmp/pi"
+seal_dir = "/tmp/seal"
+device_id = "test-device"
+
+[confirm]
+patterns = []
+`
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Confirm.Patterns == nil {
+		t.Fatal("explicit empty [confirm] patterns should stay non-nil (gating disabled)")
+	}
+	if len(cfg.Confirm.Patterns) != 0 {
+		t.Errorf("expected no confirm patterns, got %v", cfg.Confirm.Patterns)
+	}
+}

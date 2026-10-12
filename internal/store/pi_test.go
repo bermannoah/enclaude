@@ -120,7 +120,7 @@ func TestPiSealUnsealRoundTrip(t *testing.T) {
 	// Round-trip into a fresh directory.
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfigForSource(config.SourcePi, restoreDir, sealDir)
-	unsealStats, err := Unseal(cfg2, identity, UnsealOptions{AllowExecutableResources: true})
+	unsealStats, err := Unseal(cfg2, identity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}

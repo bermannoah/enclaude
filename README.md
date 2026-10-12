@@ -195,29 +195,43 @@ If you really want to sync a credential file, remove it from the `[exclude]`
 list in `~/.enclaude-pi/seal.toml` and use a strong key backup passphrase (see
 [Security Model](#security-model)).
 
-### Executable resources and auto-unseal
+### Sensitive resources and auto-unseal
 
-Settings and resources that can run code or steer the model — `settings.json`,
-`mcp.json`, `extensions/**`, `tools/**`, `skills/**`, and `prompts/**` (plus
-Claude Code's `settings.json` and `commands/**`) — are treated as *executable
-resources*. Anyone who can write to the encrypted remote and knows the public
-key published in the seal-store README can push valid ciphertext, so those files
-are the code-execution surface of a synced store.
+Some synced files change what the agent *does*, not just what it remembers. They
+fall into three groups:
 
-`enclaude unseal` therefore **does not write changed executable resources by
-default**. It lists them and leaves them in place. Review the changes, then
-apply them explicitly:
+| Group | Files | Why it is gated |
+|---|---|---|
+| Code | `settings.json`, `mcp.json`, `extensions/**`, `tools/**`, `skills/**`, `prompts/**`, `commands/**` | Runs with your privileges on the next session |
+| Instructions | `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`, `AGENTS.override.md`, `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD`, `RTK.md` | Auto-applied every session; the agent has tools, so text is a code-execution and exfiltration primitive |
+| Routing | `models.json` | Provider `baseUrl`/`apiKey` decide where prompts and keys are sent |
+
+Anyone who can write to the encrypted remote and knows the public key published
+in the seal-store README can push valid ciphertext, so these files are the
+behavior-changing surface of a synced store.
+
+`enclaude unseal` therefore **does not write changed sensitive resources by
+default**. It lists them (with a short reason) and leaves them in place. Review
+the changes, then apply them explicitly:
 
 ```bash
-enclaude unseal --yes
+enclaude diff            # inspect what changed
+enclaude unseal --yes    # apply code/instructions/routing
 ```
 
 The auto-sync hook (Claude Code or pi) never passes `--yes`, so a remote push
-cannot install code that runs on the next session without your confirmation. A
-skipped executable file stays in the manifest (tracked as *pending*, in the
-store's `.git` directory and never synced) so a later seal does not mistake it
-for a local deletion. `enclaude pull` and `enclaude sync` behave the same way
-and accept `--yes`.
+cannot install code that runs on the next session, and cannot rewrite your
+system prompt, without your confirmation. A skipped sensitive file stays in the
+manifest (tracked as *pending*, in the store's `.git` directory and never
+synced) so a later seal does not mistake it for a local deletion. `enclaude pull`
+and `enclaude sync` behave the same way and accept `--yes`.
+
+The set is configurable via `[confirm]` in `seal.toml`: add patterns to gate more,
+or set `patterns = []` to disable confirmation entirely (not recommended).
+
+> This gate covers *unattended* application of behavior-changing files. It does
+> not make synced session history safe to resume: a hostile session still feeds
+> attacker text to a tool-equipped model. Treat the remote as trusted.
 
 ### pi limitations
 
@@ -239,7 +253,7 @@ and accept `--yes`.
 |---------|-------------|
 | `init` | Generate age keypair, store in OS keychain, initial seal, write README.md to seal store |
 | `seal` | Encrypt changed files, commit to seal store |
-| `unseal` | Decrypt seal store to the source directory (add `--yes` to apply changed executable resources) |
+| `unseal` | Decrypt seal store to the source directory (add `--yes` to apply changed sensitive resources) |
 | `status` | Show changes since last seal |
 | `sync` | Seal + pull + push (the daily driver) |
 | `push` | Seal + git push |
@@ -342,6 +356,17 @@ patterns = [
 "projects/*/*.jsonl" = "immutable"
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
+
+# Paths whose remote changes require `enclaude unseal --yes` before they are
+# written (code, auto-applied instructions, request routing). Optional: when
+# absent the built-in default set is used. `patterns = []` disables the gate.
+[confirm]
+patterns = [
+  "settings.json", "mcp.json", "models.json",
+  "extensions/**", "tools/**", "skills/**", "prompts/**", "commands/**",
+  "SYSTEM.md", "APPEND_SYSTEM.md",
+  "AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "RTK.md",
+]
 ```
 
 The `source_dir` in `seal.toml` is a hint, not an authority. Because `seal.toml`
@@ -363,7 +388,7 @@ likewise pinned to the location the config was loaded from.
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
 | Tamper detection | SHA-256 content hashes in manifest; `repair --check` verifies integrity |
 | Manifest path safety | Unseal validates every path and content hash; entries that are absolute, traverse (`../`), or carry a malformed hash are refused and can be dropped with `repair` |
-| Remote trust boundary | The remote is untrusted for paths; changed executable resources are not auto-applied (see [Executable resources and auto-unseal](#executable-resources-and-auto-unseal)) |
+| Remote trust boundary | The remote is untrusted for paths; changed sensitive resources are not auto-applied (see [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal)) |
 | Key never in git | Correct — only the passphrase-encrypted backup is committed |
 | Credentials | `auth.json`, `oauth.json`, and `mcp-auth.json` are excluded from the seal by default (see [Credentials](#credentials)) |
 
@@ -373,7 +398,7 @@ likewise pinned to the location the config was loaded from.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
 - **Keychain entries are tied to the seal store path.** Moving a seal store does not carry its key with it; re-import the key after relocating a store. See [Key Management](#key-management).
-- **A synced store is a code-execution boundary.** It carries executable resources (settings, extensions, tools, skills, prompts). enclaude refuses to auto-apply changed executable resources, but once you run `unseal --yes` (or if you disable that protection) a compromised remote can run code with your privileges. Treat the remote as trusted, and review executable changes before applying them. See [Executable resources and auto-unseal](#executable-resources-and-auto-unseal).
+- **A synced store is a code-execution boundary.** It carries sensitive resources: code (settings, extensions, tools, skills, prompts), auto-applied instructions (`SYSTEM.md`, `AGENTS.md`, …), and request routing (`models.json`). enclaude refuses to auto-apply changed sensitive resources, but once you run `unseal --yes` (or if you disable that protection) a compromised remote can run code, rewrite the system prompt, or redirect model traffic. Treat the remote as trusted, and review changes with `enclaude diff` before applying them. See [Sensitive resources and auto-unseal](#sensitive-resources-and-auto-unseal).
 
 ## How It Works Under the Hood
 
@@ -415,8 +440,8 @@ The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent conc
 
 Your full Claude Code history, memory, and settings appear on the new device,
 encrypted in transit and at rest. Step 4 needs `--yes` because settings and other
-executable resources are not applied automatically; see [Executable resources and
-auto-unseal](#executable-resources-and-auto-unseal).
+executable resources are not applied automatically; see [Sensitive resources and
+auto-unseal](#sensitive-resources-and-auto-unseal).
 
 ## License
 

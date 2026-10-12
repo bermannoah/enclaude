@@ -259,7 +259,7 @@ func TestRotateReEncrypts(t *testing.T) {
 	// Verify full round-trip: unseal with new key to fresh dir
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfig(restoreDir, sealDir)
-	stats, err := Unseal(cfg2, newIdentity, UnsealOptions{AllowExecutableResources: true})
+	stats, err := Unseal(cfg2, newIdentity, UnsealOptions{AllowSensitiveResources: true})
 	if err != nil {
 		t.Fatalf("Unseal with new key error: %v", err)
 	}

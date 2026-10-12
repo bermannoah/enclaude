@@ -15,7 +15,9 @@ import (
 //
 // v3: introduced the `source` field and renamed `claude_dir` to `source_dir`
 // so a seal store can target either Claude Code or pi.dev.
-const ConfigVersion = 3
+//
+// v4: added the [confirm] section (sensitive-resource confirmation on unseal).
+const ConfigVersion = 4
 
 // Supported source profiles. A source profile defines the default directory,
 // include/exclude patterns, and merge strategies for one agent tool.
@@ -30,6 +32,7 @@ type Config struct {
 	Sync    SyncSection       `toml:"sync"`
 	Include PatternSection    `toml:"include"`
 	Exclude PatternSection    `toml:"exclude"`
+	Confirm PatternSection    `toml:"confirm"`
 	Merge   map[string]string `toml:"merge_strategies"`
 }
 
@@ -56,6 +59,36 @@ type SyncSection struct {
 
 type PatternSection struct {
 	Patterns []string `toml:"patterns"`
+}
+
+// DefaultConfirmPatterns lists the paths whose remote changes are not written
+// by unseal until the user confirms with --yes. They can run code, steer the
+// agent on the next session, or redirect where requests and keys are sent.
+//
+// The set is shared by both source profiles; patterns that do not exist in a
+// given layout are simply never matched.
+func DefaultConfirmPatterns() []string {
+	return []string{
+		// Code that runs or that the agent executes on the next session.
+		"settings.json",
+		"mcp.json",
+		"extensions/**",
+		"tools/**",
+		"skills/**",
+		"prompts/**",
+		"commands/**",
+		// Instructions that are auto-applied and steer the agent.
+		"AGENTS.md",
+		"AGENTS.override.md",
+		"AGENTS.MD",
+		"CLAUDE.md",
+		"CLAUDE.MD",
+		"SYSTEM.md",
+		"APPEND_SYSTEM.md",
+		"RTK.md",
+		// Routing: provider endpoints and inline credentials.
+		"models.json",
+	}
 }
 
 // NormalizeSource maps user-provided source names onto the canonical values.
@@ -109,6 +142,7 @@ func defaultConfig(source, sourceDir, sealDir string) *Config {
 		cfg.Exclude = PatternSection{Patterns: claudeExcludePatterns()}
 		cfg.Merge = claudeMergeStrategies()
 	}
+	cfg.Confirm = PatternSection{Patterns: DefaultConfirmPatterns()}
 
 	return cfg
 }
@@ -296,6 +330,11 @@ func Load(sealDir string) (*Config, error) {
 	}
 	if cfg.Exclude.Patterns == nil {
 		cfg.Exclude.Patterns = defaults.Exclude.Patterns
+	}
+	// Same for [confirm]: absent means the safe default set; an explicit empty
+	// list disables unseal confirmation entirely.
+	if cfg.Confirm.Patterns == nil {
+		cfg.Confirm.Patterns = defaults.Confirm.Patterns
 	}
 
 	return &cfg, nil

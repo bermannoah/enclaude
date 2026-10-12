@@ -197,7 +197,8 @@ read without the private key stored in the OS keychain on the originating device
 3. Import your private key into the keychain:
    {TICK}enclaude key import{TICK}
 4. Decrypt and restore your {SOURCE_NAME} files. Use {TICK}--yes{TICK} to also
-   apply settings and other executable resources (they are skipped by default):
+   apply sensitive resources — code, instructions, and routing config — which are
+   skipped by default:
    {TICK}enclaude unseal --yes{TICK}
 5. Reinstall auto-sync hooks on this device:
    {TICK}enclaude hooks install{TICK}

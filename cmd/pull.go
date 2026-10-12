@@ -100,13 +100,13 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowExecutableResources: flagYes})
+	unsealStats, err := store.Unseal(cfg, identity, store.UnsealOptions{Verbose: flagVerbose, AllowSensitiveResources: flagYes})
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("  %s\n", unsealStats)
 
-	warnSkippedExecutable(unsealStats)
+	warnSkippedSensitive(unsealStats)
 
 	return nil
 }

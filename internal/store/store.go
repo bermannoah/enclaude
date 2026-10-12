@@ -46,9 +46,9 @@ type UnsealStats struct {
 	Unchanged int
 	Deleted   int
 	Errors    int
-	// SkippedExecutable lists executable resources that were not written
-	// because the caller did not allow it (UnsealOptions.AllowExecutableResources).
-	SkippedExecutable []string
+	// SkippedSensitive lists sensitive resources that were not written because
+	// the caller did not allow it (UnsealOptions.AllowSensitiveResources).
+	SkippedSensitive []string
 }
 
 func (s UnsealStats) String() string {
@@ -57,8 +57,8 @@ func (s UnsealStats) String() string {
 	if s.Deleted > 0 {
 		base += fmt.Sprintf(", %d deleted", s.Deleted)
 	}
-	if len(s.SkippedExecutable) > 0 {
-		base += fmt.Sprintf(", %d executable resources skipped (need --yes)", len(s.SkippedExecutable))
+	if len(s.SkippedSensitive) > 0 {
+		base += fmt.Sprintf(", %d sensitive resources skipped (need --yes)", len(s.SkippedSensitive))
 	}
 	return base
 }
@@ -66,33 +66,47 @@ func (s UnsealStats) String() string {
 // UnsealOptions configures an unseal.
 type UnsealOptions struct {
 	Verbose bool
-	// AllowExecutableResources permits writing executable resources
-	// (settings.json, mcp.json, extensions/, tools/, skills/, prompts/,
-	// commands/). When false, such files are left untouched and reported in
-	// UnsealStats.SkippedExecutable. This gates auto-unseal from applying code
-	// delivered by a remote until the user explicitly confirms with --yes.
-	AllowExecutableResources bool
-	Progress                 ProgressFunc
+	// AllowSensitiveResources permits writing sensitive resources: code,
+	// auto-applied instructions, and request-routing config (see
+	// config.DefaultConfirmPatterns and the [confirm] section of seal.toml).
+	// When false, such files are left untouched and reported in
+	// UnsealStats.SkippedSensitive. This gates auto-unseal from applying
+	// content delivered by a remote until the user explicitly confirms with
+	// --yes.
+	AllowSensitiveResources bool
+	Progress                ProgressFunc
 }
 
-// IsExecutableResource reports whether relPath is a resource that an agent
-// executes, or that can inject commands or context into it. These are gated on
-// unseal so a compromised remote cannot push code that runs automatically.
-func IsExecutableResource(relPath string) bool {
-	for _, pattern := range []string{
-		"settings.json",
-		"mcp.json",
-		"extensions/**",
-		"tools/**",
-		"skills/**",
-		"prompts/**",
-		"commands/**",
-	} {
-		if MatchGlob(relPath, pattern) {
-			return true
-		}
+// instructionPaths are the auto-applied instruction files, used to label a
+// skipped resource with a human-readable reason.
+var instructionPaths = []string{
+	"AGENTS.md",
+	"AGENTS.override.md",
+	"AGENTS.MD",
+	"CLAUDE.md",
+	"CLAUDE.MD",
+	"SYSTEM.md",
+	"APPEND_SYSTEM.md",
+	"RTK.md",
+}
+
+// MatchesSensitive reports whether relPath matches any confirmation pattern.
+func MatchesSensitive(relPath string, patterns []string) bool {
+	return matchesAny(relPath, patterns)
+}
+
+// SensitiveReason describes why a resource requires confirmation on unseal.
+// It is a best-effort label for the warning; custom [confirm] patterns default
+// to "runs code".
+func SensitiveReason(relPath string) string {
+	switch {
+	case matchesAny(relPath, instructionPaths):
+		return "steers the agent"
+	case relPath == "models.json":
+		return "changes request routing"
+	default:
+		return "runs code"
 	}
-	return false
 }
 
 // pendingFile holds paths whose remote executable version was skipped during an
@@ -298,9 +312,11 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 // Unseal decrypts seal contents back to the source directory and removes
 // managed files not in the manifest. The manifest is the source of truth.
 //
-// Executable resources are only written when opts.AllowExecutableResources is
-// set; otherwise they are reported in UnsealStats.SkippedExecutable and recorded
-// as pending so a later seal does not mistake them for deletions.
+// Sensitive resources (code, auto-applied instructions, and request-routing
+// config; see config.DefaultConfirmPatterns) are only written when
+// opts.AllowSensitiveResources is set; otherwise they are reported in
+// UnsealStats.SkippedSensitive and recorded as pending so a later seal does not
+// mistake them for deletions.
 func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (UnsealStats, error) {
 	var stats UnsealStats
 	sealDir := cfg.Seal.SealDir
@@ -326,6 +342,14 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 	stats.Total = len(manifest.Files)
 	pending := loadPending(sealDir)
 
+	// Confirmation patterns come from the config; a nil list (hand-built
+	// configs) falls back to the safe default set, while an explicitly empty
+	// list disables gating.
+	confirmPatterns := cfg.Confirm.Patterns
+	if confirmPatterns == nil {
+		confirmPatterns = config.DefaultConfirmPatterns()
+	}
+
 	i := 0
 	for relPath, entry := range manifest.Files {
 		i++
@@ -343,9 +367,9 @@ func Unseal(cfg *config.Config, identity age.Identity, opts UnsealOptions) (Unse
 			}
 		}
 
-		// Gate executable resources unless the caller explicitly allowed them.
-		if !opts.AllowExecutableResources && IsExecutableResource(relPath) {
-			stats.SkippedExecutable = append(stats.SkippedExecutable, relPath)
+		// Gate sensitive resources unless the caller explicitly allowed them.
+		if !opts.AllowSensitiveResources && MatchesSensitive(relPath, confirmPatterns) {
+			stats.SkippedSensitive = append(stats.SkippedSensitive, relPath)
 			pending[relPath] = true
 			continue
 		}
