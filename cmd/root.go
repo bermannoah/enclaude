@@ -102,31 +102,3 @@ func getSealDir() string {
 	}
 	return defaultSealDir(getSource())
 }
-
-// defaultSealDirCandidates lists the conventional seal stores. Used by key
-// rotation so every store on the device is re-encrypted together (all stores
-// share one keychain entry).
-func defaultSealDirCandidates() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	return []string{home + "/.enclaude", home + "/.enclaude-pi"}
-}
-
-// otherExistingSealDirs returns seal stores in candidates (other than active)
-// that are actually initialized. Candidates are passed in so the caller
-// controls which locations are considered, which keeps tests off the real home
-// directory.
-func otherExistingSealDirs(active string, candidates []string) []string {
-	var out []string
-	for _, dir := range candidates {
-		if dir == active {
-			continue
-		}
-		if _, err := os.Stat(dir + "/seal.toml"); err == nil {
-			out = append(out, dir)
-		}
-	}
-	return out
-}

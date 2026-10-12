@@ -44,7 +44,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	// Seal first
-	recipient, _, err := crypto.LoadPublicKey()
+	recipient, _, err := crypto.LoadPublicKey(sealDir)
 	if err != nil {
 		return err
 	}

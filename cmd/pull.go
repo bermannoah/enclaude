@@ -44,7 +44,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Seal local changes first (commit before merge)
-	recipient, _, err := crypto.LoadPublicKey()
+	recipient, _, err := crypto.LoadPublicKey(sealDir)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Unseal merged state
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		return err
 	}

@@ -38,7 +38,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		return err
 	}

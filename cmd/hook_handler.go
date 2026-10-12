@@ -80,7 +80,7 @@ func handleSessionStart() error {
 	}
 
 	// Unseal
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		logHook("key error: %v", err)
 		return nil
@@ -121,7 +121,7 @@ func handleSessionEnd() error {
 	defer lock.Release()
 
 	// Seal
-	recipient, _, err := crypto.LoadPublicKey()
+	recipient, _, err := crypto.LoadPublicKey(sealDir)
 	if err != nil {
 		logHook("key error: %v", err)
 		return nil

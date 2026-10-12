@@ -219,7 +219,13 @@ prefer to authenticate per device, add these paths to `[exclude]` in
 | `key show` | Display public key and source |
 | `key export` | Print private key to stdout (pipe to a password manager) |
 | `key import <file>` | Import key from file, stdin (`-`), or `--from-backup` |
-| `key rotate` | Generate new key, re-encrypt all objects, update keychain |
+| `key rotate` | Generate new key, re-encrypt this store's objects, update keychain |
+
+Each seal store gets its own age key on `init`; the keychain entry is scoped to
+the store's directory, so sealing `~/.claude` and `~/.pi/agent` into two stores
+does not share or clobber a key. Set `ENCLAUDE_KEY` to override the keychain for
+a command (useful in CI); note that the environment variable applies to every
+store and takes precedence over the keychain.
 
 ### Maintenance
 | Command | Description |
@@ -297,7 +303,7 @@ patterns = [
 | Encrypted at rest (between sessions) | Yes — completed session plaintext can be shredded after seal |
 | Encrypted at rest (during active session) | No — Claude Code requires plaintext to function |
 | Encrypted in transit (git push/pull) | Yes — only age-encrypted blobs are pushed |
-| Key storage | OS keychain (macOS Keychain, Linux secret-service, Windows Credential Manager) |
+| Key storage | OS keychain (macOS Keychain, Linux secret-service, Windows Credential Manager), one entry per seal store |
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
 | Tamper detection | SHA-256 content hashes in manifest; `repair --check` verifies integrity |
 | Key never in git | Correct — only the passphrase-encrypted backup is committed |

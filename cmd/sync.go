@@ -45,7 +45,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// 1. Seal
-	recipient, _, err := crypto.LoadPublicKey()
+	recipient, _, err := crypto.LoadPublicKey(sealDir)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Println("    Already up to date.")
 	} else {
 		// Unseal after pull
-		identity, _, err := crypto.LoadKey()
+		identity, _, err := crypto.LoadKey(sealDir)
 		if err != nil {
 			return err
 		}

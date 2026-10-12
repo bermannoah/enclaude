@@ -34,7 +34,7 @@ func runReadmeRegen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	recipient, source, err := crypto.LoadPublicKey()
+	recipient, source, err := crypto.LoadPublicKey(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading key: %w", err)
 	}

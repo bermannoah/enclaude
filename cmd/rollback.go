@@ -39,7 +39,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	}
 
 	git := gitops.New(sealDir)
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		return err
 	}

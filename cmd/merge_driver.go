@@ -48,7 +48,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading key: %w", err)
 	}

@@ -42,7 +42,7 @@ func runRepair(cmd *cobra.Command, args []string) error {
 		cfg.Seal.SourceDir = flagSourceDir
 	}
 
-	identity, _, err := crypto.LoadKey()
+	identity, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		return err
 	}

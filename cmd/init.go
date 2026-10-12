@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
@@ -46,29 +45,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Source dir: %s\n", sourceDir)
 	fmt.Printf("  Seal dir:   %s\n", sealDir)
 
-	// 1. Reuse an existing key when present so multiple seal stores on the
-	// same device share one keychain entry, otherwise generate a new one.
-	var identity *age.X25519Identity
-	if existing, _, err := crypto.LoadKey(); err == nil {
-		identity = existing
-		fmt.Println("\nReusing existing age key.")
-		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
-	} else {
-		fmt.Println("\nGenerating age keypair...")
-		generated, err := crypto.GenerateKey()
-		if err != nil {
-			return fmt.Errorf("generating key: %w", err)
-		}
-		identity = generated
-		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
-
-		// 2. Store in OS keychain
-		fmt.Println("Storing private key in OS keychain...")
-		if err := crypto.StoreKey(identity); err != nil {
-			return fmt.Errorf("storing key in keychain: %w", err)
-		}
-		fmt.Println("  Stored in keychain.")
+	// 1. Generate a fresh age keypair for this seal store.
+	fmt.Println("\nGenerating age keypair...")
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		return fmt.Errorf("generating key: %w", err)
 	}
+	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+
+	// 2. Store in OS keychain, scoped to this seal store.
+	fmt.Println("Storing private key in OS keychain...")
+	if err := crypto.StoreKey(sealDir, identity); err != nil {
+		return fmt.Errorf("storing key in keychain: %w", err)
+	}
+	fmt.Println("  Stored in keychain.")
 
 	// 3. Create seal directory
 	if err := os.MkdirAll(sealDir, 0700); err != nil {

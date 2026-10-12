@@ -25,7 +25,8 @@ var keyShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the seal store's public key",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		recipient, source, err := crypto.LoadPublicKey()
+		sealDir := getSealDir()
+		recipient, source, err := crypto.LoadPublicKey(sealDir)
 		if err != nil {
 			return fmt.Errorf("loading key: %w", err)
 		}
@@ -39,7 +40,8 @@ var keyExportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export the private key (for backup or new device)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		identity, source, err := crypto.LoadKey()
+		sealDir := getSealDir()
+		identity, source, err := crypto.LoadKey(sealDir)
 		if err != nil {
 			return fmt.Errorf("loading key: %w", err)
 		}
@@ -102,7 +104,7 @@ var keyImportCmd = &cobra.Command{
 			return fmt.Errorf("invalid key: %w", err)
 		}
 
-		if err := crypto.StoreKey(identity); err != nil {
+		if err := crypto.StoreKey(getSealDir(), identity); err != nil {
 			return fmt.Errorf("storing key: %w", err)
 		}
 
@@ -116,16 +118,9 @@ var keyRotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Generate a new key and re-encrypt all sealed objects",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		activeSealDir := getSealDir()
+		sealDir := getSealDir()
 
-		// Every seal store on the device shares one keychain entry, so we must
-		// re-encrypt all of them before replacing that entry.
-		sealDirs := append([]string{activeSealDir}, otherExistingSealDirs(activeSealDir, defaultSealDirCandidates())...)
-		if len(sealDirs) > 1 {
-			fmt.Printf("Found %d seal stores sharing this key; all will be re-encrypted.\n", len(sealDirs))
-		}
-
-		oldIdentity, _, err := crypto.LoadKey()
+		oldIdentity, _, err := crypto.LoadKey(sealDir)
 		if err != nil {
 			return fmt.Errorf("loading current key: %w", err)
 		}
@@ -144,7 +139,7 @@ var keyRotateCmd = &cobra.Command{
 		passphrase = strings.TrimSpace(passphrase)
 
 		fmt.Println("Re-encrypting all objects...")
-		if err := rotateKeyAcrossStores(sealDirs, oldIdentity, newIdentity, passphrase, flagVerbose); err != nil {
+		if err := rotateSealStore(sealDir, oldIdentity, newIdentity, passphrase, flagVerbose); err != nil {
 			return err
 		}
 
@@ -155,74 +150,58 @@ var keyRotateCmd = &cobra.Command{
 	},
 }
 
-// rotateKeyAcrossStores re-encrypts every seal store with newIdentity, then
-// replaces the shared keychain entry, optionally writes a new passphrase backup
-// into each store, and commits each store.
+// rotateSealStore re-encrypts one seal store with newIdentity, replaces that
+// store's keychain entry, optionally writes a new passphrase backup, and commits
+// the store.
 //
-// A pre-flight pass verifies that every store is fully readable with the old key
-// before anything is modified, and the keychain entry is replaced only after
-// every store has been successfully re-encrypted. This prevents a store that
-// uses a different key (or has corrupt/missing objects) from stranding the
-// others. Rotation is still not transactional against mid-write failures such
-// as a full disk; use the passphrase backup to recover in that case.
-func rotateKeyAcrossStores(sealDirs []string, oldIdentity, newIdentity *age.X25519Identity, backupPassphrase string, verbose bool) error {
-	cfgs := make([]*config.Config, len(sealDirs))
-	for i, sealDir := range sealDirs {
-		cfg, err := config.Load(sealDir)
-		if err != nil {
-			return fmt.Errorf("loading config for %s: %w", sealDir, err)
-		}
-		cfgs[i] = cfg
+// It verifies that the store is fully readable with the old key before modifying
+// anything and only replaces the keychain entry after re-encryption succeeds, so
+// a corrupt store can never be left half-rotated under a new key. Rotation is
+// still not transactional against mid-write failures such as a full disk; use
+// the passphrase backup to recover in that case.
+func rotateSealStore(sealDir string, oldIdentity, newIdentity *age.X25519Identity, backupPassphrase string, verbose bool) error {
+	cfg, err := config.Load(sealDir)
+	if err != nil {
+		return err
 	}
 
-	// Pre-flight: every store must be fully readable with the current key before
-	// we modify anything.
-	for i, sealDir := range sealDirs {
-		result, err := store.Verify(cfgs[i], oldIdentity, false)
-		if err != nil {
-			return fmt.Errorf("verifying %s: %w", sealDir, err)
-		}
-		if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 {
-			return fmt.Errorf("refusing to rotate: store %s is not fully readable with the current key (%d missing, %d corrupt objects)",
-				sealDir, len(result.MissingObjects), len(result.CorruptObjects))
-		}
+	// Pre-flight: refuse to rotate a store we cannot fully read with the old key.
+	result, err := store.Verify(cfg, oldIdentity, false)
+	if err != nil {
+		return fmt.Errorf("verifying %s: %w", sealDir, err)
+	}
+	if len(result.MissingObjects) > 0 || len(result.CorruptObjects) > 0 {
+		return fmt.Errorf("refusing to rotate: %s is not fully readable with the current key (%d missing, %d corrupt objects)",
+			sealDir, len(result.MissingObjects), len(result.CorruptObjects))
 	}
 
-	for i, sealDir := range sealDirs {
-		rotated, err := store.Rotate(cfgs[i], oldIdentity, newIdentity.Recipient(), verbose, nil)
-		if err != nil {
-			return fmt.Errorf("rotation of %s: %w", sealDir, err)
-		}
-		fmt.Printf("  %s: re-encrypted %d objects.\n", sealDir, rotated)
+	rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), verbose, nil)
+	if err != nil {
+		return fmt.Errorf("rotation: %w", err)
 	}
+	fmt.Printf("  Re-encrypted %d objects.\n", rotated)
 
-	// Replace the shared keychain entry only after every store was re-encrypted.
-	if err := crypto.StoreKey(newIdentity); err != nil {
+	if err := crypto.StoreKey(sealDir, newIdentity); err != nil {
 		return fmt.Errorf("storing new key: %w", err)
 	}
 
-	// Write the new passphrase backup into every store with a single passphrase.
 	if backupPassphrase != "" {
 		backup, err := crypto.EncryptWithPassphrase([]byte(newIdentity.String()), backupPassphrase)
 		if err != nil {
 			return fmt.Errorf("creating backup: %w", err)
 		}
-		for _, sealDir := range sealDirs {
-			if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
-				return fmt.Errorf("writing backup to %s: %w", sealDir, err)
-			}
+		if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
+			return fmt.Errorf("writing backup: %w", err)
 		}
-		fmt.Println("  Key backups updated.")
+		fmt.Println("  Key backup updated.")
 	}
 
-	for i, sealDir := range sealDirs {
-		git := gitops.New(sealDir)
-		if err := git.AddAll(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-		if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfgs[i].Seal.DeviceID)); err != nil {
-			return fmt.Errorf("git commit: %w", err)
-		}
+	git := gitops.New(sealDir)
+	if err := git.AddAll(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID)); err != nil {
+		return fmt.Errorf("git commit: %w", err)
 	}
 	return nil
 }

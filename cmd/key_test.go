@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,12 +53,53 @@ func decryptWithKey(sealDir, entryHash string, identity age.Identity) ([]byte, e
 	return crypto.Decrypt(enc, identity)
 }
 
-// TestRotateKeyAcrossStores covers the shared-key multi-store rotation path:
-// both stores are re-encrypted, the keychain is updated only afterwards, a new
-// backup is written to each store, and each store is committed.
-func TestRotateKeyAcrossStores(t *testing.T) {
+// TestStoresUseIndependentKeys proves that generating/storing a key for one
+// seal store does not disturb another store's key.
+func TestStoresUseIndependentKeys(t *testing.T) {
 	keyring.MockInit()
 	t.Setenv("ENCLAUDE_KEY", "") // force the keychain (mock) path
+
+	keyA, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	storeA := filepath.Join(t.TempDir(), "sealA")
+	storeB := filepath.Join(t.TempDir(), "sealB")
+
+	if err := crypto.StoreKey(storeA, keyA); err != nil {
+		t.Fatalf("StoreKey(A) error: %v", err)
+	}
+	if err := crypto.StoreKey(storeB, keyB); err != nil {
+		t.Fatalf("StoreKey(B) error: %v", err)
+	}
+
+	gotA, _, err := crypto.LoadKey(storeA)
+	if err != nil {
+		t.Fatalf("LoadKey(A) error: %v", err)
+	}
+	gotB, _, err := crypto.LoadKey(storeB)
+	if err != nil {
+		t.Fatalf("LoadKey(B) error: %v", err)
+	}
+	if gotA.Recipient().String() != keyA.Recipient().String() {
+		t.Error("store A did not retain its own key")
+	}
+	if gotB.Recipient().String() != keyB.Recipient().String() {
+		t.Error("store B did not get its own key")
+	}
+}
+
+// TestRotateSealStore covers rotating one store's key: the store is
+// re-encrypted, the keychain entry is replaced, a new backup is written, and
+// the store is committed.
+func TestRotateSealStore(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("ENCLAUDE_KEY", "")
 	t.Setenv("GIT_AUTHOR_NAME", "test")
 	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "test")
@@ -73,23 +113,21 @@ func TestRotateKeyAcrossStores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := crypto.StoreKey(oldIdentity); err != nil {
-		t.Fatalf("StoreKey() error: %v", err)
-	}
 
 	root := t.TempDir()
-	dirs := []string{filepath.Join(root, "sealA"), filepath.Join(root, "sealB")}
-	contents := []string{`{"device":"A"}`, `{"device":"B"}`}
-	for i, dir := range dirs {
-		newSealStore(t, dir, fmt.Sprintf("%s/pi-%d", root, i), oldIdentity.Recipient(), contents[i])
+	sealDir := filepath.Join(root, "seal")
+	content := `{"device":"A"}`
+	newSealStore(t, sealDir, filepath.Join(root, "pi"), oldIdentity.Recipient(), content)
+	if err := crypto.StoreKey(sealDir, oldIdentity); err != nil {
+		t.Fatal(err)
 	}
 
-	if err := rotateKeyAcrossStores(dirs, oldIdentity, newIdentity, "correct horse", false); err != nil {
-		t.Fatalf("rotateKeyAcrossStores() error: %v", err)
+	if err := rotateSealStore(sealDir, oldIdentity, newIdentity, "correct horse", false); err != nil {
+		t.Fatalf("rotateSealStore() error: %v", err)
 	}
 
-	// The keychain must now hold the new key.
-	loaded, _, err := crypto.LoadKey()
+	// The store's keychain entry must hold the new key.
+	loaded, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		t.Fatalf("LoadKey() error: %v", err)
 	}
@@ -97,79 +135,46 @@ func TestRotateKeyAcrossStores(t *testing.T) {
 		t.Error("keychain does not hold the new key after rotation")
 	}
 
-	for i, dir := range dirs {
-		manifest, err := sealstore.LoadManifest(dir)
-		if err != nil {
-			t.Fatalf("store %d: LoadManifest() error: %v", i, err)
-		}
-		hash := manifest.Files["settings.json"].ContentHash
+	manifest, err := sealstore.LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := manifest.Files["settings.json"].ContentHash
 
-		// The new key must decrypt every store.
-		plain, err := decryptWithKey(dir, hash, newIdentity)
-		if err != nil {
-			t.Errorf("store %d: new key cannot decrypt: %v", i, err)
-		} else if string(plain) != contents[i] {
-			t.Errorf("store %d: content mismatch after rotation", i)
-		}
+	if plain, err := decryptWithKey(sealDir, hash, newIdentity); err != nil {
+		t.Errorf("new key cannot decrypt after rotation: %v", err)
+	} else if string(plain) != content {
+		t.Error("content mismatch after rotation")
+	}
+	if _, err := decryptWithKey(sealDir, hash, oldIdentity); err == nil {
+		t.Error("old key still decrypts after rotation")
+	}
 
-		// The old key must no longer decrypt.
-		if _, err := decryptWithKey(dir, hash, oldIdentity); err == nil {
-			t.Errorf("store %d: old key still decrypts after rotation", i)
-		}
+	backup, err := os.ReadFile(filepath.Join(sealDir, "key.age.backup"))
+	if err != nil {
+		t.Fatalf("missing key backup: %v", err)
+	}
+	plain, err := crypto.DecryptWithPassphrase(backup, "correct horse")
+	if err != nil {
+		t.Fatalf("backup will not decrypt: %v", err)
+	}
+	if strings.TrimSpace(string(plain)) != newIdentity.String() {
+		t.Error("backup does not contain the new key")
+	}
 
-		// A fresh passphrase backup must be present and decrypt to the new key.
-		backup, err := os.ReadFile(filepath.Join(dir, "key.age.backup"))
-		if err != nil {
-			t.Errorf("store %d: missing key backup: %v", i, err)
-		} else {
-			plain, err := crypto.DecryptWithPassphrase(backup, "correct horse")
-			if err != nil {
-				t.Errorf("store %d: backup will not decrypt: %v", i, err)
-			} else if strings.TrimSpace(string(plain)) != newIdentity.String() {
-				t.Errorf("store %d: backup does not contain the new key", i)
-			}
-		}
-
-		// Rotation must be committed in each store.
-		out, err := exec.Command("git", "-C", dir, "log", "--oneline").Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(out), "key rotation") {
-			t.Errorf("store %d: no rotation commit:\n%s", i, out)
-		}
+	out, err := exec.Command("git", "-C", sealDir, "log", "--oneline").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "key rotation") {
+		t.Errorf("no rotation commit:\n%s", out)
 	}
 }
 
-// TestOtherExistingSealDirs checks discovery of sibling stores while ignoring
-// the active one and uninitialized candidates.
-func TestOtherExistingSealDirs(t *testing.T) {
-	root := t.TempDir()
-	active := filepath.Join(root, "active")
-	initialized := filepath.Join(root, "initialized")
-	empty := filepath.Join(root, "empty")
-	for _, dir := range []string{active, initialized, empty} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(initialized, "seal.toml"), []byte("config_version = 3\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(active, "seal.toml"), []byte("config_version = 3\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	got := otherExistingSealDirs(active, []string{active, initialized, empty})
-	if len(got) != 1 || got[0] != initialized {
-		t.Errorf("otherExistingSealDirs() = %v, want [%s]", got, initialized)
-	}
-}
-
-// TestRotateKeyAcrossStoresAbortsOnUnreadableStore verifies the pre-flight: a
-// store that cannot be read with the current key aborts rotation before any
-// store is touched and before the keychain is replaced.
-func TestRotateKeyAcrossStoresAbortsOnUnreadableStore(t *testing.T) {
+// TestRotateSealStoreAbortsOnUnreadableStore verifies the pre-flight: a store
+// that cannot be read with the current key aborts rotation before the keychain
+// is replaced.
+func TestRotateSealStoreAbortsOnUnreadableStore(t *testing.T) {
 	keyring.MockInit()
 	t.Setenv("ENCLAUDE_KEY", "")
 
@@ -181,48 +186,105 @@ func TestRotateKeyAcrossStoresAbortsOnUnreadableStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := crypto.StoreKey(oldIdentity); err != nil {
+
+	root := t.TempDir()
+	sealDir := filepath.Join(root, "seal")
+	newSealStore(t, sealDir, filepath.Join(root, "pi"), oldIdentity.Recipient(), `{"good":true}`)
+	if err := crypto.StoreKey(sealDir, oldIdentity); err != nil {
 		t.Fatal(err)
 	}
 
-	root := t.TempDir()
-	good := filepath.Join(root, "sealGood")
-	bad := filepath.Join(root, "sealBad")
-	newSealStore(t, good, filepath.Join(root, "piGood"), oldIdentity.Recipient(), `{"good":true}`)
-	newSealStore(t, bad, filepath.Join(root, "piBad"), oldIdentity.Recipient(), `{"bad":true}`)
-
-	// Corrupt every object in the second store so Verify fails on it.
-	manifest, err := sealstore.LoadManifest(bad)
+	// Corrupt every object so Verify fails.
+	manifest, err := sealstore.LoadManifest(sealDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range manifest.Files {
-		objPath := filepath.Join(bad, "objects", entry.ContentHash[:2], entry.ContentHash[2:]+".age")
+		objPath := filepath.Join(sealDir, "objects", entry.ContentHash[:2], entry.ContentHash[2:]+".age")
 		if err := os.WriteFile(objPath, []byte("not ciphertext"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	err = rotateKeyAcrossStores([]string{good, bad}, oldIdentity, newIdentity, "", false)
-	if err == nil {
+	if err := rotateSealStore(sealDir, oldIdentity, newIdentity, "", false); err == nil {
 		t.Fatal("expected rotation to abort on the unreadable store")
 	}
 
 	// The keychain must still hold the old key.
-	loaded, _, err := crypto.LoadKey()
+	loaded, _, err := crypto.LoadKey(sealDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Recipient().String() != oldIdentity.Recipient().String() {
 		t.Error("keychain was replaced despite the abort")
 	}
+}
 
-	// The healthy store must still decrypt with the old key.
-	goodManifest, err := sealstore.LoadManifest(good)
-	if err != nil {
-		t.Fatal(err)
+// TestInitGeneratesIndependentKeyPerStore runs the real init flow twice and
+// confirms each store gets its own freshly generated key, never reusing a
+// previously stored one.
+func TestInitGeneratesIndependentKeyPerStore(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("ENCLAUDE_KEY", "")
+	t.Setenv("GIT_AUTHOR_NAME", "test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+
+	root := t.TempDir()
+	initStore := func(name string) (sealDir string) {
+		sealDir = filepath.Join(root, name)
+		sourceDir := filepath.Join(root, name+"-source")
+		if err := os.MkdirAll(sourceDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "settings.json"), []byte("{}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// init prompts for a backup passphrase on stdin; feed it a newline.
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.WriteString("\n"); err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+		prevStdin, prevStdout := os.Stdin, os.Stdout
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stdin, os.Stdout = r, devNull
+		defer func() {
+			os.Stdin, os.Stdout = prevStdin, prevStdout
+			r.Close()
+			devNull.Close()
+		}()
+
+		prevSource, prevSourceDir, prevSealDir := flagSource, flagSourceDir, flagSealDir
+		flagSource, flagSourceDir, flagSealDir = "pi", sourceDir, sealDir
+		defer func() { flagSource, flagSourceDir, flagSealDir = prevSource, prevSourceDir, prevSealDir }()
+
+		if err := runInit(initCmd, nil); err != nil {
+			t.Fatalf("runInit(%s) error: %v", name, err)
+		}
+		return sealDir
 	}
-	if _, err := decryptWithKey(good, goodManifest.Files["settings.json"].ContentHash, oldIdentity); err != nil {
-		t.Errorf("healthy store no longer readable with the old key: %v", err)
+
+	storeA := initStore("sealA")
+	storeB := initStore("sealB")
+
+	keyA, _, err := crypto.LoadKey(storeA)
+	if err != nil {
+		t.Fatalf("LoadKey(A) error: %v", err)
+	}
+	keyB, _, err := crypto.LoadKey(storeB)
+	if err != nil {
+		t.Fatalf("LoadKey(B) error: %v", err)
+	}
+	if keyA.Recipient().String() == keyB.Recipient().String() {
+		t.Error("second init reused the first store's key")
 	}
 }
