@@ -227,6 +227,14 @@ does not share or clobber a key. Set `ENCLAUDE_KEY` to override the keychain for
 a command (useful in CI); note that the environment variable applies to every
 store and takes precedence over the keychain.
 
+> **Moving a seal store moves the key lookup.** Because the keychain entry is
+> keyed by the store's directory, relocating a store (say from `~/.enclaude` to
+> an external drive) leaves its key behind under the old path. After moving a
+> store, re-store the key with `enclaude key import` (or `enclaude key import
+> --from-backup`) so it is saved under the new location. Stores created before
+> per-store keys keep working through a fallback to the old global keychain
+> entry.
+
 ### Maintenance
 | Command | Description |
 |---------|-------------|
@@ -313,6 +321,7 @@ patterns = [
 - **During an active Claude Code session, plaintext exists on disk.** This is unavoidable — Claude Code reads `~/.claude/` directly and cannot be modified to read encrypted data. Use OS-level disk encryption (FileVault, BitLocker, LUKS) for protection during sessions.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
+- **Keychain entries are tied to the seal store path.** Moving a seal store does not carry its key with it; re-import the key after relocating a store. See [Key Management](#key-management).
 
 ## How It Works Under the Hood
 
