@@ -599,7 +599,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		return stats, fmt.Errorf("saving pending state: %w", err)
 	}
 
-
 	// Delete files this device previously managed that are no longer in the
 	// manifest (remote deletion). Deletions are driven by the local managed
 	// ledger, never by the synced include patterns, so a compromised remote can

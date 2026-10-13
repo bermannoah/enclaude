@@ -20,7 +20,7 @@ func TestAcquireSealLockExcludesConcurrent(t *testing.T) {
 	held := session.NewSealLock(sealDir)
 	acquired, err := held.Acquire(150 * time.Millisecond)
 	if err == nil && acquired {
-		held.Release()
+		_ = held.Release()
 		t.Error("seal lock was acquired twice concurrently")
 	}
 
