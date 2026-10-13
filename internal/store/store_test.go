@@ -40,7 +40,7 @@ func TestUnsealPathTraversal(t *testing.T) {
 		t.Fatalf("os.WriteFile: %v", err)
 	}
 
-	stats, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
+	stats, err := Unseal(cfg, identity, false, nil)
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfig(restoreDir, sealDir)
 
-	unsealStats, err := Unseal(cfg2, identity, false, nil, WithAllowSensitive(true))
+	unsealStats, err := Unseal(cfg2, identity, false, nil)
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -838,7 +838,7 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 	}
 
 	// Unseal should delete the stale file
-	stats, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
+	stats, err := Unseal(cfg, identity, false, nil)
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 	}
 
 	// Unseal should NOT delete the unmanaged file
-	_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
+	_, err := Unseal(cfg, identity, false, nil)
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -1125,7 +1125,7 @@ func TestUnseal_ObjectsButNoManifest(t *testing.T) {
 		}
 		cfg := config.DefaultConfig(t.TempDir(), sealDir)
 
-		_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
+		_, err := Unseal(cfg, identity, false, nil)
 		if err == nil {
 			t.Fatal("Unseal() with objects but no manifest returned nil error")
 		}
@@ -1140,7 +1140,7 @@ func TestUnseal_ObjectsButNoManifest(t *testing.T) {
 		sealDir := t.TempDir()
 		cfg := config.DefaultConfig(t.TempDir(), sealDir)
 
-		_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
+		_, err := Unseal(cfg, identity, false, nil)
 		if err == nil {
 			t.Fatal("Unseal() on empty store returned nil error")
 		}

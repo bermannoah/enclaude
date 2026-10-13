@@ -14,8 +14,7 @@ import (
 // Bump this when adding migrations in Load().
 //
 // v3: introduced the `source` profile and renamed `claude_dir` to `source_dir`.
-// v4: added the `[confirm]` section.
-const ConfigVersion = 4
+const ConfigVersion = 3
 
 // Supported source profiles. A source profile defines the default directory,
 // include/exclude patterns, and merge strategies for one agent tool.
@@ -30,7 +29,6 @@ type Config struct {
 	Sync    SyncSection       `toml:"sync"`
 	Include PatternSection    `toml:"include"`
 	Exclude PatternSection    `toml:"exclude"`
-	Confirm PatternSection    `toml:"confirm"`
 	Merge   map[string]string `toml:"merge_strategies"`
 }
 
@@ -105,7 +103,6 @@ func DefaultConfigForSource(source, sourceDir, sealDir string) *Config {
 		cfg.Exclude = PatternSection{Patterns: claudeExcludePatterns()}
 		cfg.Merge = claudeMergeStrategies()
 	}
-	cfg.Confirm = PatternSection{Patterns: DefaultConfirmPatterns()}
 
 	return cfg
 }
@@ -243,59 +240,6 @@ func piMergeStrategies() map[string]string {
 		// rather than a structural merge.
 		"**/*.json": "last_write_wins",
 	}
-}
-
-// DefaultConfirmPatterns lists the paths whose remote changes are not written
-// by unseal until the user confirms with --yes. They can run code, steer the
-// agent on the next session, or redirect where requests and keys are sent.
-func DefaultConfirmPatterns() []string {
-	return []string{
-		// Code that runs or that the agent executes on the next session.
-		"settings.json",
-		"mcp.json",
-		"extensions/**",
-		"tools/**",
-		"skills/**",
-		"prompts/**",
-		"commands/**",
-		// Instructions that are auto-applied and steer the agent.
-		"AGENTS.md",
-		"AGENTS.override.md",
-		"AGENTS.MD",
-		"CLAUDE.md",
-		"CLAUDE.MD",
-		"SYSTEM.md",
-		"APPEND_SYSTEM.md",
-		"RTK.md",
-		// Routing: provider endpoints and inline credentials.
-		"models.json",
-		// Credentials and trust: excluded from the seal by default, but a
-		// compromised remote can still inject them into the manifest, so any
-		// change to them must also require confirmation.
-		"auth.json",
-		"oauth.json",
-		"mcp-auth.json",
-		"trust.json",
-	}
-}
-
-// EffectiveConfirmPatterns returns the built-in confirmation set unioned with
-// any configured patterns. The synced seal.toml can only *add* confirmations,
-// never remove them: otherwise a compromised remote could set
-// `[confirm] patterns = []` and push code that auto-unseal would apply.
-func EffectiveConfirmPatterns(configured []string) []string {
-	out := DefaultConfirmPatterns()
-	seen := make(map[string]bool, len(out))
-	for _, p := range out {
-		seen[p] = true
-	}
-	for _, p := range configured {
-		if p != "" && !seen[p] {
-			out = append(out, p)
-			seen[p] = true
-		}
-	}
-	return out
 }
 
 // Source returns the normalized source profile for this config.

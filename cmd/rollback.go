@@ -110,12 +110,11 @@ func runRollback(cmd *cobra.Command, args []string) error {
 
 	// Step 4: Unseal
 	fmt.Println("4/4 Unsealing restored state...")
-	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagApplySensitive))
+	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil)
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Printf("    %s\n", unsealStats)
-	warnSkippedSensitive(unsealStats)
 
 	fmt.Printf("\n%s Rolled back to %s.\n", ui.Green("Done."), ref)
 	fmt.Println("The pre-rollback state is preserved in git history.")

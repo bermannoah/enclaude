@@ -84,12 +84,11 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	stats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithRemap(mode), store.WithAllowSensitive(flagApplySensitive))
+	stats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithRemap(mode))
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
 	fmt.Println(stats.Multiline("  "))
-	warnSkippedSensitive(stats)
 
 	if stats.Errors > 0 {
 		fmt.Printf("  Warning: %d errors encountered.\n", stats.Errors)
@@ -139,18 +138,4 @@ func remapResolver(plans []store.RemapPlan) ([]store.RemapPlan, error) {
 		out = append(out, p)
 	}
 	return out, nil
-}
-
-// warnSkippedSensitive prints the sensitive resources that were not written
-// because the user did not pass --yes, with a short reason for each.
-func warnSkippedSensitive(stats store.UnsealStats) {
-	if len(stats.SkippedSensitive) == 0 {
-		return
-	}
-	fmt.Printf("\n%s %d sensitive resource(s) were not written:\n",
-		ui.Yellow("Skipped:"), len(stats.SkippedSensitive))
-	for _, p := range stats.SkippedSensitive {
-		fmt.Printf("  - %s (%s)\n", p, store.SensitiveReason(p))
-	}
-	fmt.Println("Review with 'enclaude diff', then re-run with 'enclaude unseal --allow-sensitive' to apply them.")
 }

@@ -169,32 +169,6 @@ Credentials are not synced; keep them per device via environment variables, the
 `!command` secret-manager references pi supports in `auth.json`, or a `/login`
 on each machine.
 
-## Sensitive Resources and Auto-Unseal
-
-Some sealed files change what the agent *does*, not just what it remembers. These
-are treated as sensitive and are **not written by unseal unless you pass
-`--allow-sensitive`**:
-
-- **Code**: `settings.json`, `mcp.json`, `extensions/**`, `tools/**`,
-  `skills/**`, `prompts/**`, `commands/**`
-- **Instructions**: `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`,
-  `AGENTS.override.md`, `CLAUDE.md`, `RTK.md`
-- **Routing/credentials**: `models.json`, and (gated in case a hostile manifest
-  injects them) `auth.json`, `oauth.json`, `mcp-auth.json`, `trust.json`
-
-A skipped file is listed with a reason and recorded as *pending* (in the store's
-`.git`, never synced) so a later seal does not mistake it for a local deletion.
-The auto-sync hook never passes `--allow-sensitive`, so a compromised remote
-cannot install code or rewrite your system prompt unattended. Review with
-`enclaude diff`, then apply with `enclaude unseal --allow-sensitive`. `pull`,
-`sync`, and `rollback` accept it too. (`--yes`/`-y` is a separate flag for
-accepting prompts and auto-resolving project remaps, and does *not* apply
-sensitive resources.)
-
-The set is extensible via `[confirm]` in `seal.toml`, but only *additively*: the
-built-in patterns always apply, because `seal.toml` is synced and a compromised
-remote must not be able to switch the gate off.
-
 ## Commands
 
 ### Core
@@ -296,15 +270,6 @@ patterns = [
 "projects/*/*.jsonl" = "immutable"
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
-
-# Extra paths whose remote changes require `enclaude unseal --allow-sensitive`.
-# This is
-# additive: the built-in set always applies and cannot be removed here, since
-# seal.toml is synced and may come from a compromised remote.
-[confirm]
-patterns = [
-  "notes/**",
-]
 ```
 
 The example above is abbreviated; the default configuration includes additional include/exclude patterns and merge strategies.

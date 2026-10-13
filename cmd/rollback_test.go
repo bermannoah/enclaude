@@ -138,9 +138,6 @@ func TestRollbackE2E(t *testing.T) {
 	// Prepare rollback using --force
 	rollbackForce = true
 	t.Cleanup(func() { rollbackForce = false })
-	// Sensitive resources (commands/**) are only applied with --allow-sensitive.
-	flagApplySensitive = true
-	t.Cleanup(func() { flagApplySensitive = false })
 
 	cmd := &cobra.Command{}
 

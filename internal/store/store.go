@@ -92,9 +92,6 @@ type UnsealStats struct {
 	BytesDecrypted int64
 	Merges         merge.Aggregate
 	Elapsed        time.Duration
-	// SkippedSensitive lists sensitive resources (code, instructions, routing,
-	// credentials) that were not written because the caller did not allow it.
-	SkippedSensitive []string
 }
 
 // String returns a compact single-line summary.
@@ -102,10 +99,6 @@ func (s UnsealStats) String() string {
 	if s.Deleted > 0 {
 		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d deleted",
 			s.Total, s.Restored, s.Unchanged, s.Deleted)
-	}
-	if len(s.SkippedSensitive) > 0 {
-		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d sensitive skipped (need --allow-sensitive)",
-			s.Total, s.Restored, s.Unchanged, len(s.SkippedSensitive))
 	}
 	return fmt.Sprintf("%d files: %d restored, %d unchanged",
 		s.Total, s.Restored, s.Unchanged)
@@ -321,7 +314,6 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 
 func trackDeleted(cfg *config.Config, manifest *Manifest, seen map[string]bool, verbose bool, stats *SealStats) {
 	sealDir := cfg.Seal.SealDir
-	pending := loadPending(sealDir)
 	managed := loadManaged(sealDir)
 	if _, err := os.Stat(managedFile(sealDir)); os.IsNotExist(err) {
 		// First run against an existing store: seed from the manifest so
@@ -331,11 +323,11 @@ func trackDeleted(cfg *config.Config, manifest *Manifest, seen map[string]bool, 
 		}
 	}
 
-	// An entry is deleted only if this device previously sealed it, it is
-	// genuinely gone from disk, and it is not pending (a skipped sensitive
-	// restore). This stops a compromised include from causing data loss.
+	// An entry is deleted only if this device previously sealed it and it is
+	// genuinely gone from disk. This stops a compromised include from causing
+	// data loss.
 	for path := range manifest.Files {
-		if seen[path] || pending[path] || !managed[path] || !filepath.IsLocal(path) {
+		if seen[path] || !managed[path] || !filepath.IsLocal(path) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {
@@ -354,23 +346,6 @@ func trackDeleted(cfg *config.Config, manifest *Manifest, seen map[string]bool, 
 	}
 	if err := saveManaged(sealDir, managed); err != nil {
 		fmt.Fprintf(os.Stderr, "  warning: saving managed ledger: %v\n", err)
-	}
-
-	// Pending paths that now exist locally or were removed from the manifest
-	// are no longer pending.
-	if len(pending) > 0 {
-		for path := range pending {
-			if seen[path] {
-				delete(pending, path)
-				continue
-			}
-			if _, inManifest := manifest.Files[path]; !inManifest {
-				delete(pending, path)
-			}
-		}
-		if err := savePending(sealDir, pending); err != nil {
-			fmt.Fprintf(os.Stderr, "  warning: saving pending state: %v\n", err)
-		}
 	}
 }
 
@@ -489,8 +464,7 @@ func noManifestErr(sealDir string) error {
 
 // unsealConfig holds the optional knobs for Unseal. Defaults are set in Unseal.
 type unsealConfig struct {
-	remap          RemapMode
-	allowSensitive bool
+	remap RemapMode
 }
 
 // UnsealOption configures Unseal without changing its call-site signature —
@@ -535,8 +509,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	}
 
 	stats.Total = len(manifest.Files)
-	pending := loadPending(sealDir)
-	confirmPatterns := config.EffectiveConfirmPatterns(cfg.Confirm.Patterns)
 
 	i := 0
 	for relPath, entry := range manifest.Files {
@@ -558,7 +530,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
 			if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
 				stats.Unchanged++
-				delete(pending, relPath)
 				continue
 			}
 		}
@@ -567,18 +538,8 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if existing, err := os.ReadFile(absPath); err == nil {
 			if ContentHash(existing) == entry.ContentHash {
 				stats.Unchanged++
-				delete(pending, relPath)
 				continue
 			}
-		}
-
-		// Gate sensitive resources (code, instructions, routing, credentials)
-		// unless the caller explicitly allowed them. Skipped files are recorded
-		// as pending so a later seal does not mistake them for deletions.
-		if !opt.allowSensitive && MatchesSensitive(relPath, confirmPatterns) {
-			stats.SkippedSensitive = append(stats.SkippedSensitive, relPath)
-			pending[relPath] = true
-			continue
 		}
 
 		bytesDecrypted, err := unsealFile(store, identity, entry, absPath, relPath, verbose)
@@ -587,16 +548,11 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			continue
 		}
 
-		delete(pending, relPath)
 		if verbose {
 			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
 		}
 		stats.Restored++
 		stats.BytesDecrypted += int64(bytesDecrypted)
-	}
-
-	if err := savePending(sealDir, pending); err != nil {
-		return stats, fmt.Errorf("saving pending state: %w", err)
 	}
 
 	// Delete files this device previously managed that are no longer in the
@@ -700,8 +656,8 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	diff := current.Diff(manifest)
 
 	// The "deleted" bucket must mirror what Seal actually drops: an entry is
-	// deleted only if this device previously managed it, it is genuinely gone
-	// from disk, and it is not pending (a skipped sensitive restore).
+	// deleted only if this device previously managed it and it is genuinely gone
+	// from disk.
 	diff.Deleted = nil
 	managed := loadManaged(cfg.Seal.SealDir)
 	if _, err := os.Stat(managedFile(cfg.Seal.SealDir)); os.IsNotExist(err) {
@@ -709,12 +665,11 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			managed[path] = true
 		}
 	}
-	pending := loadPending(cfg.Seal.SealDir)
 	for path := range manifest.Files {
 		if _, onDisk := current.Files[path]; onDisk {
 			continue
 		}
-		if pending[path] || !managed[path] || !filepath.IsLocal(path) {
+		if !managed[path] || !filepath.IsLocal(path) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {

@@ -112,15 +112,8 @@ func handleSessionStart() error {
 	// Session start can't block on a prompt, so remap runs in auto mode:
 	// deterministic home-prefix swaps are applied; anything ambiguous is left
 	// under its original key for `enclaude unseal --remap=interactive` to resolve.
-	stats, err := store.Unseal(cfg, identity, false, nil, store.WithRemap(store.RemapAuto), store.WithAllowSensitive(false))
-	if err != nil {
+	if _, err := store.Unseal(cfg, identity, false, nil, store.WithRemap(store.RemapAuto)); err != nil {
 		logHook("unseal error: %v", err)
-	}
-	if len(stats.SkippedSensitive) > 0 {
-		logHook("skipped %d sensitive resource(s) pending confirmation; run 'enclaude unseal --allow-sensitive'", len(stats.SkippedSensitive))
-		for _, p := range stats.SkippedSensitive {
-			logHook("  skipped: %s (%s)", p, store.SensitiveReason(p))
-		}
 	}
 
 	return nil

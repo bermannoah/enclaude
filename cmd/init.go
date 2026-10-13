@@ -202,9 +202,8 @@ passphrase-encrypted key file under {TICK}$XDG_CONFIG_HOME/enclaude/{TICK}.
 3. Import your private key (into the OS keyring if available, otherwise into
    a local passphrase-encrypted key file):
    {TICK}enclaude key import --from-backup{TICK} (or {TICK}enclaude key import keyfile.txt{TICK})
-4. Decrypt and restore your {SOURCE_NAME} files. Use {TICK}--yes{TICK} to also
-   apply sensitive resources (code, instructions, routing), skipped by default:
-   {TICK}enclaude unseal --allow-sensitive{TICK}
+4. Decrypt and restore your {SOURCE_NAME} files:
+   {TICK}enclaude unseal{TICK}
 
 {PI_NOTE}
 
@@ -251,10 +250,6 @@ func createKeyBackup(sealDir, secretKey string) error {
 	}
 
 	return nil
-}
-
-func buildReadme(publicKey, deviceID string) string {
-	return buildReadmeForSource(publicKey, deviceID, config.SourceClaude)
 }
 
 func buildReadmeForSource(publicKey, deviceID, source string) string {

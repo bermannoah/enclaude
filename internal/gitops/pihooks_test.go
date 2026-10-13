@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// TestInstallPiHooksCreatesExtension verifies the generated extension pins the
+// source profile, seal dir and source dir, and resolves the enclaude binary at
+// runtime so one file works across machines with different install paths.
 func TestInstallPiHooksCreatesExtension(t *testing.T) {
 	dir := t.TempDir()
 
@@ -50,6 +53,8 @@ func TestInstallPiHooksCreatesExtension(t *testing.T) {
 	}
 }
 
+// TestInstallPiHooksRefusesForeignFile guards that install never clobbers an
+// extensions/enclaude.ts it did not write.
 func TestInstallPiHooksRefusesForeignFile(t *testing.T) {
 	dir := t.TempDir()
 	extDir := filepath.Join(dir, "extensions")
@@ -74,6 +79,8 @@ func TestInstallPiHooksRefusesForeignFile(t *testing.T) {
 	}
 }
 
+// TestInstallPiHooksPreservesOtherExtensions verifies install leaves unrelated
+// extensions in place.
 func TestInstallPiHooksPreservesOtherExtensions(t *testing.T) {
 	dir := t.TempDir()
 	extDir := filepath.Join(dir, "extensions")
@@ -93,6 +100,7 @@ func TestInstallPiHooksPreservesOtherExtensions(t *testing.T) {
 	}
 }
 
+// TestRemovePiHooks exercises removal and that removing again is a no-op.
 func TestRemovePiHooks(t *testing.T) {
 	dir := t.TempDir()
 	if err := InstallPiHooks(dir, "/tmp/seal"); err != nil {
@@ -110,6 +118,8 @@ func TestRemovePiHooks(t *testing.T) {
 	}
 }
 
+// TestRemovePiHooksRefusesForeignFile guards that remove refuses to delete a
+// file it did not write.
 func TestRemovePiHooksRefusesForeignFile(t *testing.T) {
 	dir := t.TempDir()
 	extDir := filepath.Join(dir, "extensions")

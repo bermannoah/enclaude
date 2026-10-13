@@ -213,6 +213,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+// TestDefaultConfigForSourcePi verifies the pi profile selects the pi include,
+// exclude and merge defaults and does not leak Claude's.
 func TestDefaultConfigForSourcePi(t *testing.T) {
 	cfg := DefaultConfigForSource("pi", "/tmp/pi-agent", "/tmp/seal")
 	if cfg.Source() != SourcePi {
@@ -229,24 +231,8 @@ func TestDefaultConfigForSourcePi(t *testing.T) {
 	}
 }
 
-func TestEffectiveConfirmPatternsIsAdditive(t *testing.T) {
-	got := EffectiveConfirmPatterns([]string{"custom/**", "settings.json"})
-	has := func(p string) bool {
-		for _, g := range got {
-			if g == p {
-				return true
-			}
-		}
-		return false
-	}
-	if !has("SYSTEM.md") || !has("models.json") || !has("trust.json") {
-		t.Errorf("built-in confirmations must always apply, got %v", got)
-	}
-	if !has("custom/**") {
-		t.Error("configured pattern not added")
-	}
-}
-
+// TestLoadMigratesLegacyClaudeDir guards the v2 -> v3 rename: the legacy
+// claude_dir key becomes source_dir and is cleared so it is never written back.
 func TestLoadMigratesLegacyClaudeDir(t *testing.T) {
 	sealDir := t.TempDir()
 	content := "config_version = 2\n[seal]\nclaude_dir = \"/tmp/legacy\"\nseal_dir = \"/tmp/seal\"\ndevice_id = \"d\"\n"

@@ -7,6 +7,8 @@ import (
 	"github.com/coredipper/enclaude/internal/session"
 )
 
+// TestAcquireSealLockExcludesConcurrent guards that the CLI lock is mutually
+// exclusive and that release is idempotent and re-acquirable.
 func TestAcquireSealLockExcludesConcurrent(t *testing.T) {
 	sealDir := t.TempDir()
 
