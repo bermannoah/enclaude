@@ -137,6 +137,62 @@ enclaude hooks install
 
 This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. The installer adds to your existing hooks (peon-ping, notchi, etc.) and never overwrites them.
 
+## pi.dev Support
+
+enclaude seals pi.dev's agent data the same way, using a **source profile**. Pi stores
+its state in `~/.pi/agent` (or `$PI_CODING_AGENT_DIR`); enclaude seals it into a
+separate store so both agents can coexist.
+
+| | Claude Code | pi.dev |
+|---|---|---|
+| Flag | `--source claude` (default) | `--source pi` |
+| Source dir | `~/.claude` | `~/.pi/agent` / `$PI_CODING_AGENT_DIR` |
+| Default seal store | `~/.enclaude` | `~/.enclaude-pi` |
+| Hooks | `settings.json` hooks | managed `extensions/enclaude.ts` |
+
+```bash
+export ENCLAUDE_SOURCE=pi      # or pass --source pi to every command
+enclaude init --source pi
+enclaude seal --source pi
+enclaude unseal --source pi
+enclaude hooks install --source pi
+```
+
+Sealed: `settings.json`, `models*.json`, `keybindings.json`, `mcp.json`,
+instructions (`AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, …),
+`sessions/**/*.jsonl`, and user resources (`extensions/`, `skills/`, `prompts/`,
+`themes/`, `tools/`). Pi sessions merge as `immutable` (union).
+
+Excluded: `bin/`, `npm/`, logs, `extensions/enclaude.ts`, and the device-local
+credentials/trust files `auth.json`, `oauth.json`, `mcp-auth.json`, `trust.json`.
+Credentials are not synced; keep them per device via environment variables, the
+`!command` secret-manager references pi supports in `auth.json`, or a `/login`
+on each machine.
+
+## Sensitive Resources and Auto-Unseal
+
+Some sealed files change what the agent *does*, not just what it remembers. These
+are treated as sensitive and are **not written by unseal unless you pass
+`--yes`**:
+
+- **Code**: `settings.json`, `mcp.json`, `extensions/**`, `tools/**`,
+  `skills/**`, `prompts/**`, `commands/**`
+- **Instructions**: `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`,
+  `AGENTS.override.md`, `CLAUDE.md`, `RTK.md`
+- **Routing/credentials**: `models.json`, and (gated in case a hostile manifest
+  injects them) `auth.json`, `oauth.json`, `mcp-auth.json`, `trust.json`
+
+A skipped file is listed with a reason and recorded as *pending* (in the store's
+`.git`, never synced) so a later seal does not mistake it for a local deletion.
+The auto-sync hook never passes `--yes`, so a compromised remote cannot install
+code or rewrite your system prompt unattended. Review with `enclaude diff`, then
+apply with `enclaude unseal --yes`. `pull`, `sync`, and `rollback` accept `--yes`
+too.
+
+The set is extensible via `[confirm]` in `seal.toml`, but only *additively*: the
+built-in patterns always apply, because `seal.toml` is synced and a compromised
+remote must not be able to switch the gate off.
+
 ## Commands
 
 ### Core
@@ -202,7 +258,10 @@ These strategies are configurable per path pattern in `seal.toml`.
 
 ```toml
 [seal]
-claude_dir = "~/.claude"
+# "claude" or "pi". Selects the default include/exclude/merge profile.
+source = "claude"
+# Directory being sealed. Formerly claude_dir (still accepted on load).
+source_dir = "~/.claude"
 seal_dir = "~/.enclaude"
 device_id = "macbook-ab12cd34"
 
@@ -235,9 +294,22 @@ patterns = [
 "projects/*/*.jsonl" = "immutable"
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
+
+# Extra paths whose remote changes require `enclaude unseal --yes`. This is
+# additive: the built-in set always applies and cannot be removed here, since
+# seal.toml is synced and may come from a compromised remote.
+[confirm]
+patterns = [
+  "notes/**",
+]
 ```
 
 The example above is abbreviated; the default configuration includes additional include/exclude patterns and merge strategies.
+
+The `source_dir`/`source` values are informational: commands use the locally
+selected profile (`--source`/`ENCLAUDE_SOURCE`) and its default directory, or
+`--source-dir`, never the synced value. `seal_dir` is likewise pinned to the
+location the config was loaded from.
 
 ## Security Model
 

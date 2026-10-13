@@ -212,3 +212,55 @@ func TestDefaultConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultConfigForSourcePi(t *testing.T) {
+	cfg := DefaultConfigForSource("pi", "/tmp/pi-agent", "/tmp/seal")
+	if cfg.Source() != SourcePi {
+		t.Fatalf("Source() = %q, want pi", cfg.Source())
+	}
+	if cfg.Seal.SourceDir != "/tmp/pi-agent" {
+		t.Errorf("SourceDir = %q", cfg.Seal.SourceDir)
+	}
+	if _, ok := cfg.Merge["sessions/**/*.jsonl"]; !ok {
+		t.Error("pi defaults missing sessions/**/*.jsonl merge strategy")
+	}
+	if _, ok := cfg.Merge["history.jsonl"]; ok {
+		t.Error("claude history strategy leaked into pi config")
+	}
+}
+
+func TestEffectiveConfirmPatternsIsAdditive(t *testing.T) {
+	got := EffectiveConfirmPatterns([]string{"custom/**", "settings.json"})
+	has := func(p string) bool {
+		for _, g := range got {
+			if g == p {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("SYSTEM.md") || !has("models.json") || !has("trust.json") {
+		t.Errorf("built-in confirmations must always apply, got %v", got)
+	}
+	if !has("custom/**") {
+		t.Error("configured pattern not added")
+	}
+}
+
+func TestLoadMigratesLegacyClaudeDir(t *testing.T) {
+	sealDir := t.TempDir()
+	content := "config_version = 2\n[seal]\nclaude_dir = \"/tmp/legacy\"\nseal_dir = \"/tmp/seal\"\ndevice_id = \"d\"\n"
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Seal.SourceDir != "/tmp/legacy" {
+		t.Errorf("SourceDir = %q, want /tmp/legacy", cfg.Seal.SourceDir)
+	}
+	if cfg.Seal.LegacyClaudeDir != "" {
+		t.Error("legacy key should be cleared")
+	}
+}
