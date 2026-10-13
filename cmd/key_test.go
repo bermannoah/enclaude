@@ -288,3 +288,25 @@ func TestInitGeneratesIndependentKeyPerStore(t *testing.T) {
 		t.Error("second init reused the first store's key")
 	}
 }
+
+func TestKeyRotateRefusesEnvKey(t *testing.T) {
+	keyring.MockInit()
+	id, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENCLAUDE_KEY", id.String())
+
+	sealDir := t.TempDir()
+	prev := flagSealDir
+	flagSealDir = sealDir
+	defer func() { flagSealDir = prev }()
+
+	err = keyRotateCmd.RunE(keyRotateCmd, nil)
+	if err == nil {
+		t.Fatal("expected rotate to refuse while ENCLAUDE_KEY is set")
+	}
+	if !strings.Contains(err.Error(), "ENCLAUDE_KEY") {
+		t.Errorf("error should mention ENCLAUDE_KEY: %v", err)
+	}
+}

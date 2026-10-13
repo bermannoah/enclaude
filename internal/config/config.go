@@ -88,6 +88,13 @@ func DefaultConfirmPatterns() []string {
 		"RTK.md",
 		// Routing: provider endpoints and inline credentials.
 		"models.json",
+		// Credentials and trust decisions are excluded from the seal by default,
+		// but a compromised remote can still inject them into the manifest, so
+		// any change to them must also require confirmation.
+		"auth.json",
+		"oauth.json",
+		"mcp-auth.json",
+		"trust.json",
 	}
 }
 

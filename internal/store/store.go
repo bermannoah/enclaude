@@ -544,6 +544,35 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	}
 
 	diff := current.Diff(manifest)
+
+	// The "deleted" bucket must mirror what Seal actually drops: an entry is
+	// deleted only if this device previously managed it, it is genuinely gone
+	// from disk, and it is not pending (a skipped sensitive restore).
+	diff.Deleted = nil
+	managed := loadManaged(cfg.Seal.SealDir)
+	if _, err := os.Stat(managedFile(cfg.Seal.SealDir)); os.IsNotExist(err) {
+		for path := range manifest.Files {
+			managed[path] = true
+		}
+	}
+	pending := loadPending(cfg.Seal.SealDir)
+	for path := range manifest.Files {
+		if _, onDisk := current.Files[path]; onDisk {
+			continue
+		}
+		if pending[path] || !managed[path] {
+			continue
+		}
+		if ValidateRelPath(path) != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, relToOS(path))); err == nil {
+			continue // still on disk (e.g. excluded by a narrow include)
+		}
+		diff.Deleted = append(diff.Deleted, path)
+	}
+	sort.Strings(diff.Deleted)
+
 	return &diff, nil
 }
 
@@ -592,12 +621,23 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 		}
 	}
 
-	// Managed files on disk but not in manifest: would be deleted
-	for relPath := range onDisk {
-		if _, inManifest := manifest.Files[relPath]; !inManifest {
+	// Files this device previously managed that are missing from the manifest
+	// would be deleted. This mirrors Unseal's ledger-based deletion, not the
+	// include-scan, so a broadened or narrowed include cannot fabricate
+	// deletions in the preview.
+	managed := loadManaged(cfg.Seal.SealDir)
+	for relPath := range managed {
+		if _, inManifest := manifest.Files[relPath]; inManifest {
+			continue
+		}
+		if ValidateRelPath(relPath) != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, relToOS(relPath))); err == nil {
 			result.Deleted = append(result.Deleted, relPath)
 		}
 	}
+	sort.Strings(result.Deleted)
 
 	return &result, nil
 }
@@ -839,9 +879,11 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		entry.SizePlaintext = int64(len(plaintext))
 		entry.SizeEncrypted = int64(len(encrypted))
 		entry.MergeStrategy = ResolveMergeStrategy(path, cfg.Merge)
-		// Update Mtime from current file stat (important for last_write_wins)
+		// Update Mtime and mode from current file stat (important for
+		// last_write_wins and for keeping executable bits on repaired scripts).
 		if info, err := os.Stat(absPath); err == nil {
 			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
+			entry.Mode = uint32(info.Mode().Perm())
 		}
 		// Recompute JSONL line count
 		if strings.HasSuffix(path, ".jsonl") {

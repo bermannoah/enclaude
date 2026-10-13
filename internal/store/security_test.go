@@ -357,3 +357,146 @@ func TestUnsealRestoresExecutableBit(t *testing.T) {
 		t.Errorf("restored mode = %o, want 755", info.Mode().Perm())
 	}
 }
+
+func TestUnsealGatesCredentialAndTrustFiles(t *testing.T) {
+	sealDir := t.TempDir()
+	src := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+
+	store := NewObjectStore(sealDir)
+	store.Init()
+	m := NewManifest("attacker")
+	for _, path := range []string{"auth.json", "oauth.json", "mcp-auth.json", "trust.json"} {
+		content := []byte("{\"attacker\":true}\n")
+		h := ContentHash(content)
+		enc, _ := crypto.Encrypt(content, identity.Recipient())
+		if err := store.Write(h, enc); err != nil {
+			t.Fatal(err)
+		}
+		m.Files[path] = FileEntry{ContentHash: h}
+	}
+	if err := m.Save(sealDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	stats, err := Unseal(cfg, identity, UnsealOptions{})
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	skipped := map[string]bool{}
+	for _, p := range stats.SkippedSensitive {
+		skipped[p] = true
+	}
+	for _, path := range []string{"auth.json", "oauth.json", "mcp-auth.json", "trust.json"} {
+		if !skipped[path] {
+			t.Errorf("%s was not gated (SkippedSensitive = %v)", path, stats.SkippedSensitive)
+		}
+		if _, err := os.Stat(filepath.Join(src, path)); err == nil {
+			t.Errorf("%s was written without --yes", path)
+		}
+	}
+}
+
+func TestRepairPreservesMode(t *testing.T) {
+	src := t.TempDir()
+	script := filepath.Join(src, "tools", "run.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the object so Repair re-seals from plaintext.
+	manifest, err := LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objPath, err := NewObjectStore(sealDir).objectPath(manifest.Files["tools/run.sh"].ContentHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(objPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Repair(cfg, identity, false, false); err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+	repaired, err := LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := repaired.Files["tools/run.sh"].Mode; got != 0755 {
+		t.Errorf("repaired Mode = %o, want 755", got)
+	}
+}
+
+func TestStatusDoesNotReportExcludedFileAsDeleted(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "b.txt"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	cfg.Include.Patterns = []string{"a.txt", "b.txt"}
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Narrow the include: b.txt is still on disk but no longer scanned.
+	cfg.Include.Patterns = []string{"a.txt"}
+	diff, err := Status(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range diff.Deleted {
+		if p == "b.txt" {
+			t.Error("Status reported b.txt as deleted although it is still on disk")
+		}
+	}
+}
+
+func TestUnsealStatusUsesLedger(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfigForSource(config.SourcePi, src, sealDir)
+	cfg.Include.Patterns = []string{"*.txt"}
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new file that matches include but was never sealed must not be listed
+	// as a would-be deletion.
+	if err := os.WriteFile(filepath.Join(src, "b.txt"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := UnsealStatus(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range diff.Deleted {
+		if p == "b.txt" {
+			t.Error("UnsealStatus listed never-sealed b.txt as a would-be deletion")
+		}
+	}
+}

@@ -126,9 +126,12 @@ var keyRotateCmd = &cobra.Command{
 		}
 		defer release()
 
-		oldIdentity, _, err := crypto.LoadKey(sealDir)
+		oldIdentity, source, err := crypto.LoadKey(sealDir)
 		if err != nil {
 			return fmt.Errorf("loading current key: %w", err)
+		}
+		if source == "env" {
+			return fmt.Errorf("key rotation is not supported while ENCLAUDE_KEY is set: the environment variable overrides the keychain and would shadow the new key; unset it and run again")
 		}
 		oldPub := oldIdentity.Recipient().String()
 

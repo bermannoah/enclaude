@@ -195,6 +195,11 @@ If you really want to sync a credential file, remove it from the `[exclude]`
 list in `~/.enclaude-pi/seal.toml` and use a strong key backup passphrase (see
 [Security Model](#security-model)).
 
+Credential and trust files (`auth.json`, `oauth.json`, `mcp-auth.json`,
+`trust.json`) are also in the confirmation set: even though they are excluded
+from a normal seal, a hostile remote can inject them into the manifest, so any
+change to them requires `enclaude unseal --yes`.
+
 ### Sensitive resources and auto-unseal
 
 Some synced files change what the agent *does*, not just what it remembers. They
@@ -280,8 +285,9 @@ Each seal store gets its own age key on `init`; the keychain entry is scoped to
 the store's directory, so sealing `~/.claude` and `~/.pi/agent` into two stores
 does not share or clobber a key. Set `ENCLAUDE_KEY` to override the keychain for
 a command (useful in CI); note that the environment variable applies to every
-store and takes precedence over the keychain, and `init` uses it when set instead
-of generating a new key.
+store and takes precedence over the keychain, `init` uses it when set instead of
+generating a new key, and `key rotate` refuses to run while it is set (the new
+key would be shadowed by the environment variable).
 
 > **Moving a seal store moves the key lookup.** Because the keychain entry is
 > keyed by the store's directory, relocating a store (say from `~/.enclaude` to
