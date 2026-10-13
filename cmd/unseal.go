@@ -84,7 +84,7 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	stats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithRemap(mode), store.WithAllowSensitive(flagYes))
+	stats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithRemap(mode), store.WithAllowSensitive(flagApplySensitive))
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
@@ -152,5 +152,5 @@ func warnSkippedSensitive(stats store.UnsealStats) {
 	for _, p := range stats.SkippedSensitive {
 		fmt.Printf("  - %s (%s)\n", p, store.SensitiveReason(p))
 	}
-	fmt.Println("Review with 'enclaude diff', then re-run with 'enclaude unseal --yes' to apply them.")
+	fmt.Println("Review with 'enclaude diff', then re-run with 'enclaude unseal --allow-sensitive' to apply them.")
 }

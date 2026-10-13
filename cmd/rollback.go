@@ -110,7 +110,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 
 	// Step 4: Unseal
 	fmt.Println("4/4 Unsealing restored state...")
-	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagYes))
+	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagApplySensitive))
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}

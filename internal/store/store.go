@@ -104,7 +104,7 @@ func (s UnsealStats) String() string {
 			s.Total, s.Restored, s.Unchanged, s.Deleted)
 	}
 	if len(s.SkippedSensitive) > 0 {
-		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d sensitive skipped (need --yes)",
+		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d sensitive skipped (need --allow-sensitive)",
 			s.Total, s.Restored, s.Unchanged, len(s.SkippedSensitive))
 	}
 	return fmt.Sprintf("%d files: %d restored, %d unchanged",

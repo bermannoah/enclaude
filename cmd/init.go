@@ -204,7 +204,7 @@ passphrase-encrypted key file under {TICK}$XDG_CONFIG_HOME/enclaude/{TICK}.
    {TICK}enclaude key import --from-backup{TICK} (or {TICK}enclaude key import keyfile.txt{TICK})
 4. Decrypt and restore your {SOURCE_NAME} files. Use {TICK}--yes{TICK} to also
    apply sensitive resources (code, instructions, routing), skipped by default:
-   {TICK}enclaude unseal --yes{TICK}
+   {TICK}enclaude unseal --allow-sensitive{TICK}
 
 {PI_NOTE}
 

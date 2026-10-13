@@ -103,7 +103,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagYes))
+	unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagApplySensitive))
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}

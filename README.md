@@ -173,7 +173,7 @@ on each machine.
 
 Some sealed files change what the agent *does*, not just what it remembers. These
 are treated as sensitive and are **not written by unseal unless you pass
-`--yes`**:
+`--allow-sensitive`**:
 
 - **Code**: `settings.json`, `mcp.json`, `extensions/**`, `tools/**`,
   `skills/**`, `prompts/**`, `commands/**`
@@ -184,10 +184,12 @@ are treated as sensitive and are **not written by unseal unless you pass
 
 A skipped file is listed with a reason and recorded as *pending* (in the store's
 `.git`, never synced) so a later seal does not mistake it for a local deletion.
-The auto-sync hook never passes `--yes`, so a compromised remote cannot install
-code or rewrite your system prompt unattended. Review with `enclaude diff`, then
-apply with `enclaude unseal --yes`. `pull`, `sync`, and `rollback` accept `--yes`
-too.
+The auto-sync hook never passes `--allow-sensitive`, so a compromised remote
+cannot install code or rewrite your system prompt unattended. Review with
+`enclaude diff`, then apply with `enclaude unseal --allow-sensitive`. `pull`,
+`sync`, and `rollback` accept it too. (`--yes`/`-y` is a separate flag for
+accepting prompts and auto-resolving project remaps, and does *not* apply
+sensitive resources.)
 
 The set is extensible via `[confirm]` in `seal.toml`, but only *additively*: the
 built-in patterns always apply, because `seal.toml` is synced and a compromised
@@ -295,7 +297,8 @@ patterns = [
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
 
-# Extra paths whose remote changes require `enclaude unseal --yes`. This is
+# Extra paths whose remote changes require `enclaude unseal --allow-sensitive`.
+# This is
 # additive: the built-in set always applies and cannot be removed here, since
 # seal.toml is synced and may come from a compromised remote.
 [confirm]

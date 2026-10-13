@@ -117,7 +117,7 @@ func handleSessionStart() error {
 		logHook("unseal error: %v", err)
 	}
 	if len(stats.SkippedSensitive) > 0 {
-		logHook("skipped %d sensitive resource(s) pending confirmation; run 'enclaude unseal --yes'", len(stats.SkippedSensitive))
+		logHook("skipped %d sensitive resource(s) pending confirmation; run 'enclaude unseal --allow-sensitive'", len(stats.SkippedSensitive))
 		for _, p := range stats.SkippedSensitive {
 			logHook("  skipped: %s (%s)", p, store.SensitiveReason(p))
 		}

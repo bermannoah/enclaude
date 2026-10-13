@@ -15,12 +15,13 @@ import (
 var Version = "0.2.0"
 
 var (
-	flagVerbose   bool
-	flagDryRun    bool
-	flagSource    string
-	flagSourceDir string
-	flagSealDir   string
-	flagYes       bool
+	flagVerbose        bool
+	flagDryRun         bool
+	flagSource         string
+	flagSourceDir      string
+	flagSealDir        string
+	flagYes            bool
+	flagApplySensitive bool
 )
 
 var rootCmd = &cobra.Command{
@@ -50,7 +51,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagSourceDir, "source-dir", "", "override the source directory (e.g. ~/.claude or ~/.pi/agent)")
 	rootCmd.PersistentFlags().StringVar(&flagSourceDir, "claude-dir", "", "alias for --source-dir")
 	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.enclaude/ location")
-	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y", false, "accept prompts non-interactively, and apply sensitive resources on unseal")
+	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y", false, "accept prompts non-interactively (e.g. auto-accept project remaps)")
+	rootCmd.PersistentFlags().BoolVar(&flagApplySensitive, "allow-sensitive", false, "allow unseal to write sensitive resources (code, instructions, routing, credentials)")
 }
 
 // getSource resolves the active source profile from flags, the ENCLAUDE_SOURCE

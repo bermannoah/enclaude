@@ -96,7 +96,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagYes))
+		unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagApplySensitive))
 		if err != nil {
 			return fmt.Errorf("unseal: %w", err)
 		}
