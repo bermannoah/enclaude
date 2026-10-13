@@ -78,9 +78,11 @@ func runPush(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Push
+	// Push. The manifest is committed, so release the lock so a long network
+	// transfer does not block a session hook.
 	branch, _ := git.CurrentBranch()
 	fmt.Printf("Pushing to %s/%s...\n", remote, branch)
+	release()
 
 	var out string
 	if git.HasUpstream() {

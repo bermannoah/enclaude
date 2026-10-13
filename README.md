@@ -379,10 +379,13 @@ is synced from the remote, neither the `source` profile nor `source_dir` is
 trusted for filesystem operations: enclaude uses the locally selected profile
 and its default directory (`~/.claude`, `~/.pi/agent`, or `PI_CODING_AGENT_DIR`)
 unless it matches what `seal.toml` records, and otherwise fails closed and asks
-for `--source`/`--source-dir`. A default install therefore never reads or writes
-outside its expected directory, even if the remote is compromised. Custom layouts
-must pass `--source-dir` on every command (put it in an alias). `seal_dir` is
-likewise pinned to the location the config was loaded from.
+for `--source`/`--source-dir`. Passing `--seal-dir` explicitly also confirms the
+store, so its recorded profile is used for the default directory (useful for
+`enclaude hooks status --seal-dir ~/.enclaude-pi`). A default install therefore
+never reads or writes outside its expected directory, even if the remote is
+compromised. Custom layouts must pass `--source-dir` on every command (put it in
+an alias). `seal_dir` is likewise pinned to the location the config was loaded
+from.
 
 For the same reason, unseal only deletes files it has actually sealed before,
 tracked in a local, non-synced ledger under the store's `.git` directory. A
@@ -440,7 +443,7 @@ Claude Code runs (reads/writes ~/.claude/ as normal)
 Session ends → hook fires → seal changes + push
 ```
 
-The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code. Mutating CLI commands (`seal`, `unseal`, `pull`, `push`, `sync`, `repair`, `rollback`, `key rotate`) take the same lock (waiting up to 30 seconds), so a manual command and a session hook can't race on the manifest or the local state files.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code. Mutating CLI commands (`seal`, `unseal`, `pull`, `push`, `sync`, `repair`, `rollback`, `key rotate`) take the same lock (waiting up to 30 seconds), so a manual command and a session hook can't race on the manifest or the local state files. The lock is released before the outbound `git push`, so a long transfer doesn't stall a session hook.
 
 ### New Device Onboarding
 

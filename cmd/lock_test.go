@@ -25,6 +25,7 @@ func TestAcquireSealLockExcludesConcurrent(t *testing.T) {
 	}
 
 	release()
+	release() // release must be idempotent (callers release early before push)
 
 	again, err := acquireSealLock(sealDir)
 	if err != nil {

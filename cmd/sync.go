@@ -106,8 +106,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 		warnSkippedSensitive(unsealStats)
 	}
 
-	// 3. Push
+	// 3. Push. The manifest is committed and unsealed, so release the lock so a
+	// long transfer does not block a session hook.
 	fmt.Printf("3/3 Pushing to %s/%s...\n", remote, branch)
+	release()
 	if git.HasUpstream() {
 		out, err = git.Push(remote, branch)
 	} else {

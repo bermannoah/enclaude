@@ -105,21 +105,32 @@ func getSourceDir() string {
 // local state (flags, environment, or the built-in default), never from the
 // synced seal.toml. This prevents a compromised remote from redirecting
 // operations to another directory or another agent's default.
+//
+// One exception: if the user explicitly points at a store with --seal-dir and
+// does not name a profile, that store's own profile is trusted for its default
+// directory (so e.g. `hooks status --seal-dir ~/.enclaude-pi` works).
 func resolveSourceDir(cfg *config.Config) (string, error) {
-	local := getSource()
 	if flagSourceDir != "" {
 		return flagSourceDir, nil
 	}
-	if cfg.Source() != local {
-		return "", fmt.Errorf("seal.toml records source %q but this command is using %q; pass --source %s (or --source-dir) to confirm",
-			cfg.Source(), local, cfg.Source())
+	if local := getSource(); cfg.Source() != local {
+		if flagSealDir == "" || sourceExplicitlySet() {
+			return "", fmt.Errorf("seal.toml records source %q but this command is using %q; pass --source %s (or --source-dir) to confirm",
+				cfg.Source(), local, cfg.Source())
+		}
 	}
-	def := defaultSourceDir(local)
+	def := defaultSourceDir(cfg.Source())
 	if cfg.Seal.SourceDir != "" && filepath.Clean(cfg.Seal.SourceDir) != filepath.Clean(def) {
 		return "", fmt.Errorf("seal.toml records source_dir %q, which differs from the local default %q; pass --source-dir %q to confirm",
 			cfg.Seal.SourceDir, def, cfg.Seal.SourceDir)
 	}
 	return def, nil
+}
+
+// sourceExplicitlySet reports whether the user named a source profile rather
+// than relying on the default.
+func sourceExplicitlySet() bool {
+	return flagSource != "" || os.Getenv("ENCLAUDE_SOURCE") != ""
 }
 
 func getSealDir() string {

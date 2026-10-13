@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/coredipper/enclaude/internal/session"
@@ -13,8 +14,10 @@ import (
 const cliLockTimeout = 30 * time.Second
 
 // acquireSealLock takes the seal store lock for a mutating command and returns
-// a release function. This serializes CLI runs against each other and against
-// the session hooks, which mutate the manifest and the local state files.
+// an idempotent release function. This serializes CLI runs against each other
+// and against the session hooks, which mutate the manifest and local state.
+// Callers may release early (e.g. before an outbound git push) so long network
+// operations do not block session hooks.
 func acquireSealLock(sealDir string) (func(), error) {
 	lock := session.NewSealLock(sealDir)
 	acquired, err := lock.Acquire(cliLockTimeout)
@@ -24,5 +27,6 @@ func acquireSealLock(sealDir string) (func(), error) {
 	if !acquired {
 		return nil, fmt.Errorf("another enclaude operation is in progress (%s)", filepath.Join(sealDir, ".seal.lock"))
 	}
-	return func() { _ = lock.Release() }, nil
+	var once sync.Once
+	return func() { once.Do(func() { _ = lock.Release() }) }, nil
 }
