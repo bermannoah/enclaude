@@ -40,6 +40,12 @@ func runRepair(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.SourceDir = getSourceDir()
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	identity, _, err := crypto.LoadKey()
 	if err != nil {
 		return err

@@ -357,7 +357,7 @@ Claude Code runs (reads/writes ~/.claude/ as normal)
 Session ends → hook fires → seal changes + push (if auto_push)
 ```
 
-The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If it can't get the lock within 5 seconds, the hook exits quietly so Claude Code is never blocked.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If it can't get the lock within 5 seconds, the hook exits quietly so Claude Code is never blocked. Mutating CLI commands (`seal`, `unseal`, `pull`, `push`, `sync`, `repair`, `rollback`, `key rotate`) take the same lock (waiting up to 30 seconds), so a manual command and a session hook cannot race on the manifest. The lock is released before the outbound `git push` so a long transfer does not stall a session hook.
 
 ### New Device Onboarding
 
