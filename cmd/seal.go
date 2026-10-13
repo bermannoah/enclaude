@@ -28,7 +28,7 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
 
 	if flagDryRun {
 		fmt.Println("(dry run — showing what would be sealed)")

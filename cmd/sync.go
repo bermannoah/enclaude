@@ -38,7 +38,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
 
 	git := gitops.New(sealDir)
 
@@ -90,13 +90,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil)
+		unsealStats, err := store.Unseal(cfg, identity, flagVerbose, nil, store.WithAllowSensitive(flagYes))
 		if err != nil {
 			return fmt.Errorf("unseal: %w", err)
 		}
 		unsealStats.Merges = mergeAgg
 		fmt.Println(formatPullLine("    ", pullStats, mergeAgg))
 		fmt.Println(unsealStats.Multiline("    "))
+		warnSkippedSensitive(unsealStats)
 	}
 
 	// 3. Push

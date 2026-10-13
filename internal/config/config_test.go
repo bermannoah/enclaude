@@ -154,8 +154,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected Version %d, got %d", ConfigVersion, cfg.Version)
 	}
 
-	if cfg.Seal.ClaudeDir != claudeDir {
-		t.Errorf("expected ClaudeDir %q, got %q", claudeDir, cfg.Seal.ClaudeDir)
+	if cfg.Seal.SourceDir != claudeDir {
+		t.Errorf("expected SourceDir %q, got %q", claudeDir, cfg.Seal.SourceDir)
 	}
 
 	if cfg.Seal.SealDir != sealDir {

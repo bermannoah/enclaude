@@ -40,7 +40,7 @@ func TestUnsealPathTraversal(t *testing.T) {
 		t.Fatalf("os.WriteFile: %v", err)
 	}
 
-	stats, err := Unseal(cfg, identity, false, nil)
+	stats, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestUnsealPathTraversal(t *testing.T) {
 }
 
 // TestRepairPathTraversal guards Repair's re-seal loop against a manifest key
-// that escapes ClaudeDir ("../secret.txt"). Without the filepath.IsLocal check,
+// that escapes SourceDir ("../secret.txt"). Without the filepath.IsLocal check,
 // Repair reads the external file, encrypts it into the object store, and records
 // it in the manifest — an arbitrary-file exfiltration vector. The guard must
 // skip the entry so the external file's bytes never enter the store.
@@ -69,7 +69,7 @@ func TestRepairPathTraversal(t *testing.T) {
 		t.Fatalf("os.MkdirAll: %v", err)
 	}
 
-	// Secret outside ClaudeDir; the manifest key "../secret.txt" resolves here.
+	// Secret outside SourceDir; the manifest key "../secret.txt" resolves here.
 	secret := []byte("top secret outside claude dir")
 	if err := os.WriteFile(filepath.Join(parent, "secret.txt"), secret, 0600); err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	restoreDir := t.TempDir()
 	cfg2 := config.DefaultConfig(restoreDir, sealDir)
 
-	unsealStats, err := Unseal(cfg2, identity, false, nil)
+	unsealStats, err := Unseal(cfg2, identity, false, nil, WithAllowSensitive(true))
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestPurgePlaintextRequiresRecoverableObject(t *testing.T) {
 }
 
 // TestPurgePlaintextSkipsSymlink verifies purge never follows a managed path
-// symlink, which would let --shred overwrite a target outside ClaudeDir.
+// symlink, which would let --shred overwrite a target outside SourceDir.
 func TestPurgePlaintextSkipsSymlink(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -380,7 +380,7 @@ func TestPurgePlaintextSkipsSymlinkedParent(t *testing.T) {
 
 // TestPurgePlaintextRootedReadBlocksSymlinkSwap verifies that a symlink swapped
 // into a managed path after the precheck cannot redirect purge to a file outside
-// ClaudeDir; the rooted re-open detects the change and errors instead of removing.
+// SourceDir; the rooted re-open detects the change and errors instead of removing.
 func TestPurgePlaintextRootedReadBlocksSymlinkSwap(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -838,7 +838,7 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 	}
 
 	// Unseal should delete the stale file
-	stats, err := Unseal(cfg, identity, false, nil)
+	stats, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 	}
 
 	// Unseal should NOT delete the unmanaged file
-	_, err := Unseal(cfg, identity, false, nil)
+	_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
 	if err != nil {
 		t.Fatalf("Unseal() error: %v", err)
 	}
@@ -1125,7 +1125,7 @@ func TestUnseal_ObjectsButNoManifest(t *testing.T) {
 		}
 		cfg := config.DefaultConfig(t.TempDir(), sealDir)
 
-		_, err := Unseal(cfg, identity, false, nil)
+		_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
 		if err == nil {
 			t.Fatal("Unseal() with objects but no manifest returned nil error")
 		}
@@ -1140,7 +1140,7 @@ func TestUnseal_ObjectsButNoManifest(t *testing.T) {
 		sealDir := t.TempDir()
 		cfg := config.DefaultConfig(t.TempDir(), sealDir)
 
-		_, err := Unseal(cfg, identity, false, nil)
+		_, err := Unseal(cfg, identity, false, nil, WithAllowSensitive(true))
 		if err == nil {
 			t.Fatal("Unseal() on empty store returned nil error")
 		}

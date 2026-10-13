@@ -32,7 +32,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
 
 	git := gitops.New(sealDir)
 

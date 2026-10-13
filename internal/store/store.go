@@ -92,6 +92,9 @@ type UnsealStats struct {
 	BytesDecrypted int64
 	Merges         merge.Aggregate
 	Elapsed        time.Duration
+	// SkippedSensitive lists sensitive resources (code, instructions, routing,
+	// credentials) that were not written because the caller did not allow it.
+	SkippedSensitive []string
 }
 
 // String returns a compact single-line summary.
@@ -99,6 +102,10 @@ func (s UnsealStats) String() string {
 	if s.Deleted > 0 {
 		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d deleted",
 			s.Total, s.Restored, s.Unchanged, s.Deleted)
+	}
+	if len(s.SkippedSensitive) > 0 {
+		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d sensitive skipped (need --yes)",
+			s.Total, s.Restored, s.Unchanged, len(s.SkippedSensitive))
 	}
 	return fmt.Sprintf("%d files: %d restored, %d unchanged",
 		s.Total, s.Restored, s.Unchanged)
@@ -168,14 +175,14 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		priorDeviceID, priorOriginHome = manifest.DeviceID, manifest.OriginHome
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
-	manifest.OriginHome = homeDir(cfg.Seal.ClaudeDir)
+	manifest.OriginHome = homeDir(cfg.Seal.SourceDir)
 
 	// Active session IDs (PID-alive). Empty when the sessions dir is absent
 	// (e.g. tests) — falls back to path-based completion semantics.
-	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+	activeSessions := activeSessionIDs(cfg.Seal.SourceDir)
 
 	// Scan files
-	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return stats, fmt.Errorf("scanning files: %w", err)
 	}
@@ -187,7 +194,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	// real deletions on other machines. Refuse rather than wipe.
 	if len(files) == 0 && len(manifest.Files) > 0 {
 		return stats, fmt.Errorf("scanned 0 files under %s but the manifest tracks %d — refusing to seal what would delete every entry; check claude_dir (or --claude-dir), or delete the seal store and re-init if this is intentional",
-			cfg.Seal.ClaudeDir, len(manifest.Files))
+			cfg.Seal.SourceDir, len(manifest.Files))
 	}
 
 	// Track which files still exist (for deletion detection)
@@ -202,7 +209,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		processFile(f, manifest, store, recipient, cfg, activeSessions, verbose, &stats)
 	}
 
-	trackDeleted(manifest, seen, verbose, &stats)
+	trackDeleted(cfg, manifest, seen, verbose, &stats)
 	tallySessions(manifest, prior, &stats)
 
 	// Persist only when something real changed (content, first seal, or a
@@ -306,20 +313,63 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 		Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
 		ModTimeNs:       f.ModTimeNs,
 		MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+		Mode:            f.Mode,
 		JSONLLineCount:  lineCount,
 		SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
 	}
 }
 
-func trackDeleted(manifest *Manifest, seen map[string]bool, verbose bool, stats *SealStats) {
-	// Mark deleted files
+func trackDeleted(cfg *config.Config, manifest *Manifest, seen map[string]bool, verbose bool, stats *SealStats) {
+	sealDir := cfg.Seal.SealDir
+	pending := loadPending(sealDir)
+	managed := loadManaged(sealDir)
+	if _, err := os.Stat(managedFile(sealDir)); os.IsNotExist(err) {
+		// First run against an existing store: seed from the manifest so
+		// pre-upgrade local deletions still propagate, then maintain locally.
+		for path := range manifest.Files {
+			managed[path] = true
+		}
+	}
+
+	// An entry is deleted only if this device previously sealed it, it is
+	// genuinely gone from disk, and it is not pending (a skipped sensitive
+	// restore). This stops a compromised include from causing data loss.
 	for path := range manifest.Files {
-		if !seen[path] {
-			if verbose {
-				fmt.Printf("  [del] %s\n", path)
+		if seen[path] || pending[path] || !managed[path] || !filepath.IsLocal(path) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {
+			continue // still on disk (e.g. excluded by a narrow include)
+		}
+		if verbose {
+			fmt.Printf("  [del] %s\n", path)
+		}
+		delete(manifest.Files, path)
+		stats.Deleted++
+	}
+
+	// Everything scanned on disk is managed by this device.
+	for path := range seen {
+		managed[path] = true
+	}
+	if err := saveManaged(sealDir, managed); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: saving managed ledger: %v\n", err)
+	}
+
+	// Pending paths that now exist locally or were removed from the manifest
+	// are no longer pending.
+	if len(pending) > 0 {
+		for path := range pending {
+			if seen[path] {
+				delete(pending, path)
+				continue
 			}
-			delete(manifest.Files, path)
-			stats.Deleted++
+			if _, inManifest := manifest.Files[path]; !inManifest {
+				delete(pending, path)
+			}
+		}
+		if err := savePending(sealDir, pending); err != nil {
+			fmt.Fprintf(os.Stderr, "  warning: saving pending state: %v\n", err)
 		}
 	}
 }
@@ -406,6 +456,12 @@ func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absP
 	if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
 		return 0, err
 	}
+	// Apply the recorded permission bits (WriteFile only honors the mode when
+	// creating a new file). Mask to 0o777 so setuid/setgid cannot be restored.
+	mode := os.FileMode(entry.Mode) & 0o777
+	if mode != 0 {
+		_ = os.Chmod(absPath, mode)
+	}
 	if entry.ModTimeNs != 0 {
 		mtime := time.Unix(0, entry.ModTimeNs)
 		// Best effort: a stale mtime only makes the next status rehash
@@ -433,7 +489,8 @@ func noManifestErr(sealDir string) error {
 
 // unsealConfig holds the optional knobs for Unseal. Defaults are set in Unseal.
 type unsealConfig struct {
-	remap RemapMode
+	remap          RemapMode
+	allowSensitive bool
 }
 
 // UnsealOption configures Unseal without changing its call-site signature —
@@ -478,6 +535,8 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	}
 
 	stats.Total = len(manifest.Files)
+	pending := loadPending(sealDir)
+	confirmPatterns := config.EffectiveConfirmPatterns(cfg.Confirm.Patterns)
 
 	i := 0
 	for relPath, entry := range manifest.Files {
@@ -485,7 +544,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if progress != nil {
 			progress(i, stats.Total, relPath)
 		}
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
+		absPath := filepath.Join(cfg.Seal.SourceDir, relPath)
 
 		if !filepath.IsLocal(relPath) {
 			stats.Errors++
@@ -499,6 +558,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
 			if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
 				stats.Unchanged++
+				delete(pending, relPath)
 				continue
 			}
 		}
@@ -507,8 +567,18 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if existing, err := os.ReadFile(absPath); err == nil {
 			if ContentHash(existing) == entry.ContentHash {
 				stats.Unchanged++
+				delete(pending, relPath)
 				continue
 			}
+		}
+
+		// Gate sensitive resources (code, instructions, routing, credentials)
+		// unless the caller explicitly allowed them. Skipped files are recorded
+		// as pending so a later seal does not mistake them for deletions.
+		if !opt.allowSensitive && MatchesSensitive(relPath, confirmPatterns) {
+			stats.SkippedSensitive = append(stats.SkippedSensitive, relPath)
+			pending[relPath] = true
+			continue
 		}
 
 		bytesDecrypted, err := unsealFile(store, identity, entry, absPath, relPath, verbose)
@@ -517,6 +587,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			continue
 		}
 
+		delete(pending, relPath)
 		if verbose {
 			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
 		}
@@ -524,46 +595,34 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		stats.BytesDecrypted += int64(bytesDecrypted)
 	}
 
-	// Delete managed files not in the manifest. The manifest is the source
-	// of truth — after git pull/merge, it reflects the intended state
-	// including remote deletions. Skip if restore had errors (incomplete
-	// unseal should not trigger deletions).
+	if err := savePending(sealDir, pending); err != nil {
+		return stats, fmt.Errorf("saving pending state: %w", err)
+	}
+
+
+	// Delete files this device previously managed that are no longer in the
+	// manifest (remote deletion). Deletions are driven by the local managed
+	// ledger, never by the synced include patterns, so a compromised remote can
+	// only delete files that were actually sealed — not arbitrary files that
+	// happen to match a broadened include. Skip if restore had errors.
 	if stats.Errors > 0 {
 		return stats, nil
 	}
-	existingFiles, scanErr := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
-	if scanErr != nil {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
+	managed := loadManaged(sealDir)
+	for relPath := range managed {
+		if _, inManifest := manifest.Files[relPath]; inManifest {
+			continue
 		}
-		stats.Errors++
-		return stats, nil
-	}
-	{
-		manifestPaths := make(map[string]bool, len(manifest.Files))
-		for relPath := range manifest.Files {
-			manifestPaths[relPath] = true
+		if !filepath.IsLocal(relPath) {
+			continue
 		}
-		for _, f := range existingFiles {
-			if !manifestPaths[f.RelPath] {
-				if err := os.Remove(f.AbsPath); err == nil {
-					stats.Deleted++
-					if verbose {
-						fmt.Printf("  [delete] %s\n", f.RelPath)
-					}
-					dir := filepath.Dir(f.AbsPath)
-					if dir != cfg.Seal.ClaudeDir {
-						// Removes the parent only once it is empty; failure
-						// for a non-empty directory is expected.
-						_ = os.Remove(dir)
-					}
-				} else {
-					stats.Errors++
-					if verbose {
-						fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
-					}
-				}
+		absPath := filepath.Join(cfg.Seal.SourceDir, relPath)
+		if err := os.Remove(absPath); err == nil {
+			stats.Deleted++
+			if verbose {
+				fmt.Printf("  [delete] %s\n", relPath)
 			}
+			trimEmptyParents(absPath, cfg.Seal.SourceDir)
 		}
 	}
 
@@ -583,7 +642,7 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 		manifest = NewManifest(cfg.Seal.DeviceID)
 	}
 
-	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return nil, fmt.Errorf("scanning files: %w", err)
 	}
@@ -640,6 +699,31 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	wg.Wait()
 
 	diff := current.Diff(manifest)
+
+	// The "deleted" bucket must mirror what Seal actually drops: an entry is
+	// deleted only if this device previously managed it, it is genuinely gone
+	// from disk, and it is not pending (a skipped sensitive restore).
+	diff.Deleted = nil
+	managed := loadManaged(cfg.Seal.SealDir)
+	if _, err := os.Stat(managedFile(cfg.Seal.SealDir)); os.IsNotExist(err) {
+		for path := range manifest.Files {
+			managed[path] = true
+		}
+	}
+	pending := loadPending(cfg.Seal.SealDir)
+	for path := range manifest.Files {
+		if _, onDisk := current.Files[path]; onDisk {
+			continue
+		}
+		if pending[path] || !managed[path] || !filepath.IsLocal(path) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, path)); err == nil {
+			continue // still on disk (e.g. excluded by a narrow include)
+		}
+		diff.Deleted = append(diff.Deleted, path)
+	}
+	sort.Strings(diff.Deleted)
 	return &diff, nil
 }
 
@@ -669,8 +753,8 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
 	// restore), treat as empty — all manifest files would be restored.
 	var files []ScanResult
-	if _, statErr := os.Stat(cfg.Seal.ClaudeDir); statErr == nil {
-		files, err = ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	if _, statErr := os.Stat(cfg.Seal.SourceDir); statErr == nil {
+		files, err = ScanFiles(cfg.Seal.SourceDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 		if err != nil {
 			return nil, fmt.Errorf("scanning files: %w", err)
 		}
@@ -733,12 +817,22 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 		}
 	}
 
-	// Managed files on disk but not in manifest: would be deleted
-	for relPath := range onDisk {
-		if _, inManifest := manifest.Files[relPath]; !inManifest {
+	// Files this device previously managed that are missing from the manifest
+	// would be deleted. This mirrors Unseal's ledger-based deletion, not the
+	// include scan, so a broadened include cannot fabricate deletions.
+	managed := loadManaged(cfg.Seal.SealDir)
+	for relPath := range managed {
+		if _, inManifest := manifest.Files[relPath]; inManifest {
+			continue
+		}
+		if !filepath.IsLocal(relPath) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Seal.SourceDir, relPath)); err == nil {
 			result.Deleted = append(result.Deleted, relPath)
 		}
 	}
+	sort.Strings(result.Deleted)
 
 	return &result, nil
 }
@@ -791,9 +885,9 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 		return stats, noManifestErr(cfg.Seal.SealDir)
 	}
 
-	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+	activeSessions := activeSessionIDs(cfg.Seal.SourceDir)
 	objects := NewObjectStore(cfg.Seal.SealDir)
-	root, err := os.OpenRoot(cfg.Seal.ClaudeDir)
+	root, err := os.OpenRoot(cfg.Seal.SourceDir)
 	if err != nil {
 		return stats, fmt.Errorf("opening Claude root: %w", err)
 	}
@@ -1367,7 +1461,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 	// Mirror Seal's PID-aware completion check so a Repair doesn't
 	// silently flip SessionComplete=true on currently-active session
 	// transcripts.
-	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+	activeSessions := activeSessionIDs(cfg.Seal.SourceDir)
 
 	// Track old hashes that get superseded during repair so we can
 	// include them in orphan deletion (they become orphaned only after
@@ -1376,7 +1470,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, path)
+		absPath := filepath.Join(cfg.Seal.SourceDir, path)
 		if !filepath.IsLocal(path) {
 			continue
 		}
@@ -1410,6 +1504,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		if info, err := os.Stat(absPath); err == nil {
 			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
 			entry.ModTimeNs = info.ModTime().UnixNano()
+			entry.Mode = uint32(info.Mode().Perm())
 		}
 		// Recompute JSONL line count
 		if strings.HasSuffix(path, ".jsonl") {

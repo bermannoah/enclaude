@@ -62,7 +62,7 @@ func loadHookConfig() (cfg *config.Config, sealDir string, ok bool) {
 	// this wrong is destructive: a session-end seal against another machine's
 	// (nonexistent) claude_dir scans zero files and commits a manifest with
 	// every entry deleted.
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
 
 	return cfg, sealDir, true
 }
@@ -112,9 +112,15 @@ func handleSessionStart() error {
 	// Session start can't block on a prompt, so remap runs in auto mode:
 	// deterministic home-prefix swaps are applied; anything ambiguous is left
 	// under its original key for `enclaude unseal --remap=interactive` to resolve.
-	_, err = store.Unseal(cfg, identity, false, nil, store.WithRemap(store.RemapAuto))
+	stats, err := store.Unseal(cfg, identity, false, nil, store.WithRemap(store.RemapAuto), store.WithAllowSensitive(false))
 	if err != nil {
 		logHook("unseal error: %v", err)
+	}
+	if len(stats.SkippedSensitive) > 0 {
+		logHook("skipped %d sensitive resource(s) pending confirmation; run 'enclaude unseal --yes'", len(stats.SkippedSensitive))
+		for _, p := range stats.SkippedSensitive {
+			logHook("  skipped: %s (%s)", p, store.SensitiveReason(p))
+		}
 	}
 
 	return nil

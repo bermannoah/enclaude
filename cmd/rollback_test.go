@@ -23,10 +23,10 @@ func TestRollbackE2E(t *testing.T) {
 	sealDir := t.TempDir()
 
 	// Override global flags
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 
@@ -138,6 +138,9 @@ func TestRollbackE2E(t *testing.T) {
 	// Prepare rollback using --force
 	rollbackForce = true
 	t.Cleanup(func() { rollbackForce = false })
+	// Sensitive resources (commands/**) are only applied with --yes.
+	flagYes = true
+	t.Cleanup(func() { flagYes = false })
 
 	cmd := &cobra.Command{}
 
@@ -176,10 +179,10 @@ func TestRollbackAbort(t *testing.T) {
 	claudeDir := t.TempDir()
 	sealDir := t.TempDir()
 
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 
